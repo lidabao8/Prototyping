@@ -68,7 +68,7 @@ export class Menus {
         <div class="mm-rank"><b>RANK ${rank}</b><span>${xp} XP</span></div>
       </div>
       <div class="mm-info">
-        <div><b>6</b><span>maps</span></div><div><b>3</b><span>modes</span></div><div><b>31</b><span>AI soldiers</span></div><div><b>6</b><span>classes</span></div>
+        <div><b>${Object.keys(MAPS).length}</b><span>maps</span></div><div><b>3</b><span>modes</span></div><div><b>31</b><span>AI soldiers</span></div><div><b>6</b><span>classes</span></div>
       </div>
       <div class="foot">Every model, texture and sound is generated in code.</div>`);
     s.querySelector('[data-a=play]').onclick = () => this.showSetup();

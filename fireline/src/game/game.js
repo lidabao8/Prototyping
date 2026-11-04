@@ -148,7 +148,7 @@ export class Game {
     const team = p.team;
     const hq = this.def.hq[team];
     opts.push({ kind: 'hq', key: 'hq', label: 'HQ', x: hq.x, z: hq.z });
-    for (const f of this.mode.flagSpawns(team)) opts.push({ kind: 'flag', key: 'flag' + f.id, label: `${f.id} · ${f.name}`, x: f.x, z: f.z, flag: f });
+    for (const f of this.safeFlagSpawns(team)) opts.push({ kind: 'flag', key: 'flag' + f.id, label: `${f.id} · ${f.name}`, x: f.x, z: f.z, flag: f });
     if (p.squad) {
       for (const m of p.squad.members) {
         if (m === p || m.state !== 'alive' || !this.safeToSpawnOn(m)) continue;
@@ -161,6 +161,11 @@ export class Game {
     return opts;
   }
 
+  // Owned, uncontested flags with no enemy within 30 m of the capture zone
+  safeFlagSpawns(team) {
+    return this.mode.flagSpawns(team).filter(f => !this.teams[1 - team].some(e => e.state === 'alive' && Math.hypot(e.pos.x - f.x, e.pos.z - f.z) < f.r + 30));
+  }
+
   safeToSpawnOn(m) {
     if (this.time - m.lastDamage < 6 || m.swimming || m.vault) return false;
     for (const e of this.teams[1 - m.team]) if (e.state === 'alive' && Math.hypot(e.pos.x - m.pos.x, e.pos.z - m.pos.z) < 22) return false;
@@ -171,7 +176,17 @@ export class Game {
   resolveSpawn(opt, team) {
     const nav = this.world.nav;
     const enemies = this.teams[1 - team].filter(e => e.state === 'alive');
-    const score = (x, z) => { let d = 1e9; for (const e of enemies) d = Math.min(d, Math.hypot(e.pos.x - x, e.pos.z - z)); return d; };
+    const coll = this.world.collision;
+    // Prefer points far from enemies and out of their line of sight (checked at head height)
+    const score = (x, z, y) => {
+      let d = 1e9, seen = 0;
+      for (const e of enemies) {
+        const dist = Math.hypot(e.pos.x - x, e.pos.z - z);
+        d = Math.min(d, dist);
+        if (dist < 260 && coll.los(e.pos.x, e.pos.y + 1.6, e.pos.z, x, y + 1.5, z)) seen++;
+      }
+      return Math.min(d, 80) - seen * 60;
+    };
     let x, z, y, yaw;
     const faceTo = (tx, tz) => Math.atan2(-(tx - x), -(tz - z));
     const center = this.mode.flags.length ? this.mode.flags.reduce((a, f) => ({ x: a.x + f.x / this.mode.flags.length, z: a.z + f.z / this.mode.flags.length }), { x: 0, z: 0 }) : { x: 0, z: 0 };
@@ -189,10 +204,10 @@ export class Game {
       const r = opt.kind === 'hq' ? Math.min(20, this.def.hq[team].r * 0.6) : opt.kind === 'flag' ? opt.flag.r * 0.8 : 4;
       let best = null, bs = -1;
       const lim = this.def.playHalf - 6;
-      for (let k = 0; k < 14; k++) {
+      for (let k = 0; k < 16; k++) {
         let [cx, cz, cy] = nav.randomWalkableNear(opt.x, opt.z, r);
-        if (Math.abs(cx) > lim || Math.abs(cz) > lim) { if (k < 13) continue; cx = Math.max(-lim, Math.min(lim, cx)); cz = Math.max(-lim, Math.min(lim, cz)); }
-        const sc = score(cx, cz) + Math.random() * 5;
+        if (Math.abs(cx) > lim || Math.abs(cz) > lim) { if (k < 15 || best) continue; cx = Math.max(-lim, Math.min(lim, cx)); cz = Math.max(-lim, Math.min(lim, cz)); }
+        const sc = score(cx, cz, cy) + Math.random() * 5;
         if (sc > bs) { bs = sc; best = [cx, cz, cy]; }
       }
       [x, z, y] = best;
@@ -236,7 +251,7 @@ export class Game {
       if (mates.length) { const m = mates[Math.floor(Math.random() * mates.length)]; opts.push({ kind: 'squad', mate: m, x: m.pos.x, z: m.pos.z }); }
     }
     if (!opts.length) {
-      const flags = this.mode.flagSpawns(s.team);
+      const flags = this.safeFlagSpawns(s.team);
       if (flags.length && order) {
         let best = null, bd = 1e9;
         for (const f of flags) { const d = Math.hypot(f.x - order.x, f.z - order.z); if (d < bd) { bd = d; best = f; } }

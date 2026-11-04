@@ -22,7 +22,7 @@ class App {
     if (this.params.get('test')) this.input.allowUnlocked = true;
     if (this.params.get('preset')) settings.set('preset', this.params.get('preset'));
     this.menus = new Menus(this);
-    this.matchConfig = { map: this.params.get('map') || 'greenhollow', mode: this.params.get('mode') || 'conquest', time: this.params.get('time') || 'default', team: 0, tickets: 0, name: 'You' };
+    this.matchConfig = { map: this.params.get('map') || 'ironworks', mode: this.params.get('mode') || 'conquest', time: this.params.get('time') || 'default', team: 0, tickets: 0, name: 'You' };
     this.game = null;
     this.last = performance.now();
     window.addEventListener('resize', () => this.resize());

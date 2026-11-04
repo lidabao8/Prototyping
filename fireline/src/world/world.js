@@ -1,6 +1,6 @@
 // Builds a playable world from a map definition: layout -> terrain -> collision -> structures -> vegetation -> nav.
 import * as THREE from 'three';
-import { Layout, coastX } from './maps.js';
+import { Layout } from './maps.js';
 import { Terrain } from './terrain.js';
 import { CollisionWorld } from './collision.js';
 import { Structures } from './buildings.js';
@@ -37,10 +37,6 @@ export class World {
       this.structures.prop('bridge', b.x, b.z, 0, { len: b.len + 4, w: b.w, deckY, y: deckY - 3 });
       this.structures.footprints.push({ minX: b.x - b.w / 2, maxX: b.x + b.w / 2, minZ: b.z - b.len / 2, maxZ: b.z + b.len / 2, color: 'rgba(160,155,145,0.95)' });
       b.deckY = deckY;
-    }
-    for (const p of layout.piers || []) {
-      const cx = coastX(p.z, def._n);
-      this.structures.prop('pier', Math.floor(cx - 14) + 0.5, Math.floor(p.z) + 0.5, 3, { len: 50, w: 6, deckY: 2.25, y: 0 });
     }
     this.flagPoles(scene);
     this.structures.finalize(scene);

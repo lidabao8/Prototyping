@@ -449,6 +449,17 @@ export class Structures {
         for (let k = -len / 2 + 8; k < len / 2 - 4; k += 10) f.box('concrete', -w / 2 + 0.5, dy - 9, k - 0.6, w / 2 - 0.5, dy - 0.7, k + 0.6, { destructible: false, color: 0x8c887f });
         break;
       }
+      case 'blastWall': {
+        // concrete T-wall sections: tall, bulletproof spawn screens
+        const n = o.n || 3, H = o.h || 3.6;
+        for (let i = 0; i < n; i++) {
+          const x0 = -n + i * 2, fy = this.terrain.heightAt(...f.tf(x0 + 1, 0)) - y;
+          f.box('concrete', x0, fy - 0.3, -0.2, x0 + 2, fy + H, 0.2, { color: i % 2 ? 0xb4b0a6 : 0xbcb8ae, destructible: false });
+          f.box('concrete', x0 + 0.06, fy - 0.3, -0.55, x0 + 1.94, fy + 0.45, 0.55, { color: 0xa8a49a, destructible: false });
+        }
+        this.footprint(x, z, rot, n, 0.5, 'rgba(150,146,138,0.95)');
+        break;
+      }
       case 'tent': {
         const c = o.color ?? 0x6b6e4e;
         f.box('cloth', -2, 0, -2.5, -1.9, 1.6, 2.5, { color: c }); f.box('cloth', 1.9, 0, -2.5, 2, 1.6, 2.5, { color: c });
