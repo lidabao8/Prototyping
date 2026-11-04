@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { clamp, DEG } from '../core/math.js';
 import { TEAM_COLORS } from '../entities/models.js';
 import { CLASSES } from '../data/loadout.js';
+import { keybinds } from '../core/keybinds.js';
 
 const FRIEND = '#4aa8ff', SQUAD = '#86e05a', ENEMY = '#ff4b3a', NEUTRAL = '#c8c8c8';
 const _p = new THREE.Vector3();
@@ -38,6 +39,9 @@ export class HUD {
     this.oob = el('div', 'oob', root);
     this.fps = el('div', 'fps', root);
     this.flashEl = el('div', 'flashbang', root);
+    this.banner = el('div', 'killbanner', root);
+    this.ammoHint = el('div', 'ammohint', root);
+    this.breathEl = el('div', 'breath', root); this.breathEl.innerHTML = '<span>HOLD BREATH</span><div><i></i></div>';
     this.order = el('div', 'orderline', root);
     this.board = el('div', 'scoreboard', root);
     this.bigmap = el('canvas', 'bigmap', root); this.bigmap.width = this.bigmap.height = 760;
@@ -75,6 +79,11 @@ export class HUD {
     this.toastItems.push({ row, t: 2.2 });
     if (this.toastItems.length > 5) { const o = this.toastItems.shift(); o.row.remove(); }
   }
+  killBanner(name, head, downed) {
+    this.banner.innerHTML = `<div class="kb-x">✕</div><div class="kb-t">${downed ? 'ENEMY DOWN' : 'ENEMY KILLED'}${head ? ' <b>HEADSHOT</b>' : ''}</div><div class="kb-n">${name}</div>`;
+    this.banner.classList.remove('show'); void this.banner.offsetWidth; this.banner.classList.add('show');
+    clearTimeout(this._bt); this._bt = setTimeout(() => this.banner.classList.remove('show'), 2200);
+  }
   toast(text, dur = 2.5) { this.msg.textContent = text; this.msg.style.opacity = 1; this.msgT = dur; }
   hit(kill, head) { this.hitT = 0.16; this.hitKill = kill; this.hitHead = head; }
   damageFrom(dir) {
@@ -103,12 +112,26 @@ export class HUD {
     this.updateCapture();
     const scoped = g.playerCtl && g.playerCtl.isScoped();
     this.scope.style.display = scoped ? 'block' : 'none';
+    // hold-breath meter while scoped
+    const ctl = g.playerCtl;
+    const showBreath = scoped && p.gun && ctl;
+    this.breathEl.style.display = showBreath ? 'block' : 'none';
+    if (showBreath) { this.breathEl.querySelector('i').style.width = `${ctl.breath * 100}%`; this.breathEl.classList.toggle('on', !!ctl.holding); this.breathEl.querySelector('span').textContent = `HOLD [${keybinds.name('sprint')}] TO STEADY`; }
+    // ammo hints
+    const gg = p.gun;
+    let hint = '';
+    if (p.state === 'alive' && gg && p.reloadT <= 0) {
+      if (gg.mag === 0 && gg.reserve === 0) hint = '<b class="bad">NO AMMO</b> · find an ammo box or switch weapons';
+      else if (gg.mag === 0) hint = `<b class="bad">RELOAD</b> [${keybinds.name('reload')}]`;
+      else if (gg.mag <= Math.ceil(gg.stats.mag * 0.25) && gg.reserve > 0) hint = `LOW AMMO · [${keybinds.name('reload')}]`;
+    }
+    if (hint !== this._hint) { this._hint = hint; this.ammoHint.innerHTML = hint; }
     this.flashEl.style.opacity = clamp(p.flashed * 1.4, 0, 1);
     // prompt
     const pr = g.playerCtl && g.playerCtl.prompt;
     this.prompt.textContent = pr || '';
     this.prompt.style.display = pr && p.state === 'alive' ? 'block' : 'none';
-    const showAct = p.action && !['throw', 'throwC4', 'reloadGadget'].includes(p.action.name);
+    const showAct = p.action && !['throw', 'throwC4', 'reloadGadget', 'melee'].includes(p.action.name);
     const prog = p.reviveProgress > 0 ? p.reviveProgress : showAct ? 1 - p.actionT / p.actionDur : 0;
     this.progress.style.display = prog > 0 && p.state === 'alive' ? 'block' : 'none';
     this.progress.firstChild.style.width = `${prog * 100}%`;
@@ -116,7 +139,7 @@ export class HUD {
     if (p.state === 'downed') {
       this.downedEl.style.display = 'block';
       const reviver = p.reviver && p.reviver.state === 'alive' && p.reviver.reviveProgress > 0;
-      this.downedEl.innerHTML = `<div class="dt">YOU ARE DOWN</div><div class="ds">${reviver ? `${p.reviver.name} is reviving you…` : 'Wait for a teammate to revive you'}</div><div class="dbar"><div style="width:${clamp(p.downedHp, 0, 100)}%"></div></div><div class="dk">Hold [SPACE] to give up ${this.giveUp > 0 ? Math.round(this.giveUp * 100) + '%' : ''}</div>`;
+      this.downedEl.innerHTML = `<div class="dt">YOU ARE DOWN</div><div class="ds">${reviver ? `${p.reviver.name} is reviving you…` : 'Wait for a teammate to revive you'}</div><div class="dbar"><div style="width:${clamp(p.downedHp, 0, 100)}%"></div></div><div class="dk">Hold [${keybinds.name('jump')}] to give up ${this.giveUp > 0 ? Math.round(this.giveUp * 100) + '%' : ''}</div>`;
     } else this.downedEl.style.display = 'none';
     // out of bounds
     const oob = g.oobTime;
@@ -127,13 +150,13 @@ export class HUD {
     if (sq && sq.order) {
       const o = sq.order;
       const label = o.type === 'follow' ? 'FOLLOW SQUAD LEADER' : o.type === 'move' ? 'MOVE TO MARKER' : `${o.type.toUpperCase()} ${o.flag && o.flag.id ? o.flag.id + ' · ' + o.flag.name : ''}`;
-      this.order.innerHTML = `<b>${sq.name}</b> ${label}${sq.leader === p ? ' <span>[T] give orders</span>' : ''}`;
+      this.order.innerHTML = `<b>${sq.name}</b> ${label}${sq.leader === p ? ` <span>[${keybinds.name('spot')}] give orders</span>` : ''}`;
     } else this.order.textContent = '';
     // scoreboard / big map
-    const showBoard = g.input.down('Tab') && !g.uiBlocking();
+    const showBoard = keybinds.down(g.input, 'scoreboard') && !g.uiBlocking();
     this.board.style.display = showBoard ? 'block' : 'none';
     if (showBoard) this.drawBoard();
-    const showMap = g.input.down('KeyM') && !g.uiBlocking();
+    const showMap = keybinds.down(g.input, 'map') && !g.uiBlocking();
     this.bigmap.style.display = showMap ? 'block' : 'none';
     if (showMap) this.drawMap(this.bigmap, false);
   }
@@ -201,12 +224,12 @@ export class HUD {
       if (!s) return '';
       const name = s.kind === 'gun' ? s.stats.name : s.def.name;
       const cnt = s.kind === 'gun' ? '' : (s.def.count === Infinity ? '' : `<em>${s.count}</em>`);
-      return `<div class="slot${i === p.active ? ' on' : ''}${s.kind === 'gadget' && s.count <= 0 && s.def.count !== Infinity ? ' empty' : ''}"><i>${i + 1}</i>${name}${cnt}</div>`;
+      return `<div class="slot${i === p.active ? ' on' : ''}${s.kind === 'gadget' && s.count <= 0 && s.def.count !== Infinity ? ' empty' : ''}"><i>${keybinds.name('slot' + (i + 1))}</i>${name}${cnt}</div>`;
     }).join('');
     const key = main + ammo + mode + slots + p.bandages + (p.reloadT > 0);
     if (key === this.lastWeaponKey) return;
     this.lastWeaponKey = key;
-    this.weaponEl.innerHTML = `<div class="wname">${main}${p.reloadT > 0 ? ' <span class="rl">RELOADING</span>' : ''}</div><div class="ammo">${ammo}<div class="fmode">${mode}</div></div><div class="slots">${slots}<div class="slot"><i>X</i>Bandage<em>${p.bandages}</em></div></div>`;
+    this.weaponEl.innerHTML = `<div class="wname">${main}${p.reloadT > 0 ? ' <span class="rl">RELOADING</span>' : ''}</div><div class="ammo">${ammo}<div class="fmode">${mode}</div></div><div class="slots">${slots}<div class="slot"><i>${keybinds.name('bandage')}</i>Bandage<em>${p.bandages}</em></div></div>`;
   }
 
   updateVitals() {
@@ -218,7 +241,7 @@ export class HUD {
       const f = this.vitals.querySelector('.hpfill');
       f.style.width = `${hp}%`;
       f.style.background = hp < 30 ? '#e8443a' : hp < 60 ? '#e8b23a' : '#e9eef2';
-      this.vitals.querySelector('.vstat').innerHTML = `${p.bleed > 0 ? '<span class="bleed">BLEEDING · [X] bandage</span>' : ''}<span class="stance">${p.stance.toUpperCase()}</span><span class="cls" style="color:${CLASSES[p.cls].color}">${CLASSES[p.cls].name.toUpperCase()}</span>`;
+      this.vitals.querySelector('.vstat').innerHTML = `${p.bleed > 0 ? `<span class="bleed">BLEEDING · [${keybinds.name('bandage')}] bandage</span>` : ''}<span class="stance">${p.stance.toUpperCase()}</span><span class="cls" style="color:${CLASSES[p.cls].color}">${CLASSES[p.cls].name.toUpperCase()}</span>`;
     }
   }
 
@@ -448,6 +471,22 @@ export class HUD {
         c.fillStyle = ENEMY;
         c.beginPath(); c.moveTo(sp[0], sp[1] - r); c.lineTo(sp[0] + r, sp[1]); c.lineTo(sp[0], sp[1] + r); c.lineTo(sp[0] - r, sp[1]); c.closePath(); c.fill();
       }
+    }
+    // incoming grenades / launcher rounds near the player
+    for (const pr of g.combat.projectiles) {
+      if (!['frag', 'impact', 'launcher', 'flash'].includes(pr.type)) continue;
+      const d = Math.hypot(pr.x - p.pos.x, pr.y - p.pos.y, pr.z - p.pos.z);
+      if (d > 12 || p.state === 'dead') continue;
+      let sp = proj(pr.x, pr.y + 0.3, pr.z);
+      const pulse = 0.6 + 0.4 * Math.sin(now * 18);
+      if (!sp) { const rel = Math.atan2(pr.x - p.pos.x, -(pr.z - p.pos.z)) + p.yaw; sp = [W / 2 + Math.sin(rel) * 140 * dpr, H / 2 - Math.cos(rel) * 140 * dpr]; }
+      const [gx, gy] = clampEdge(sp[0], sp[1]);
+      c.globalAlpha = pulse;
+      c.fillStyle = 'rgba(0,0,0,0.55)'; c.beginPath(); c.arc(gx, gy, 15 * dpr, 0, 7); c.fill();
+      c.strokeStyle = '#ff5a3a'; c.lineWidth = 2.5 * dpr; c.beginPath(); c.arc(gx, gy, 15 * dpr, 0, 7); c.stroke();
+      c.fillStyle = '#ff5a3a'; c.beginPath(); c.arc(gx, gy + 2 * dpr, 6 * dpr, 0, 7); c.fill(); c.fillRect(gx - 2 * dpr, gy - 9 * dpr, 4 * dpr, 6 * dpr);
+      c.font = `700 ${10 * dpr}px Rajdhani, sans-serif`; c.fillText(`${d.toFixed(0)}m`, gx, gy + 26 * dpr);
+      c.globalAlpha = 1;
     }
     // rally / beacon
     for (const pl of g.combat.placed) {

@@ -8,6 +8,7 @@ export class GameAudio {
   }
 
   unlock() {
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return; // wait for a real click/key
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;

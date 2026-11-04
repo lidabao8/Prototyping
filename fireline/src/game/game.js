@@ -26,6 +26,7 @@ const GRADES = {
   noon: { sat: 1.06, contrast: 1.05, lift: [0.0, 0.0, 0.01], gamma: [1, 1, 1], gain: [1.0, 1.0, 0.98] },
   afternoon: { sat: 1.04, contrast: 1.07, lift: [0.015, 0.01, 0.0], gamma: [1, 1, 1], gain: [1.05, 1.0, 0.9] },
   dusk: { sat: 1.12, contrast: 1.08, lift: [0.02, 0.0, 0.02], gamma: [1, 1, 1], gain: [1.08, 0.96, 0.88] },
+  overcast: { sat: 0.9, contrast: 1.08, lift: [0.01, 0.012, 0.016], gamma: [1, 1, 1], gain: [0.98, 1.0, 1.03] },
   night: { sat: 0.85, contrast: 1.05, lift: [0.0, 0.01, 0.03], gamma: [1, 1, 1.05], gain: [0.92, 0.98, 1.1] },
 };
 
@@ -48,7 +49,7 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(70, w / h, 0.06, this.settings.get('viewDistance'));
     scene.add(this.camera);
     this.vmScene = new THREE.Scene();
-    this.vmCamera = new THREE.PerspectiveCamera(58, w / h, 0.01, 10);
+    this.vmCamera = new THREE.PerspectiveCamera(64, w / h, 0.01, 10);
     this.vmScene.add(new THREE.HemisphereLight(0xdde8ff, 0x50483e, 1.1));
     this.vmLight = new THREE.DirectionalLight(0xffffff, 1.6);
     this.vmScene.add(this.vmLight);
@@ -183,10 +184,12 @@ export class Game {
       if (x === undefined) { x = m.pos.x; z = m.pos.z; y = m.pos.y; }
       yaw = m.yaw;
     } else {
-      const r = opt.kind === 'hq' ? 20 : opt.kind === 'flag' ? opt.flag.r * 0.8 : 4;
+      const r = opt.kind === 'hq' ? Math.min(20, this.def.hq[team].r * 0.6) : opt.kind === 'flag' ? opt.flag.r * 0.8 : 4;
       let best = null, bs = -1;
-      for (let k = 0; k < 8; k++) {
-        const [cx, cz, cy] = nav.randomWalkableNear(opt.x, opt.z, r);
+      const lim = this.def.playHalf - 6;
+      for (let k = 0; k < 14; k++) {
+        let [cx, cz, cy] = nav.randomWalkableNear(opt.x, opt.z, r);
+        if (Math.abs(cx) > lim || Math.abs(cz) > lim) { if (k < 13) continue; cx = Math.max(-lim, Math.min(lim, cx)); cz = Math.max(-lim, Math.min(lim, cz)); }
         const sc = score(cx, cz) + Math.random() * 5;
         if (sc > bs) { bs = sc; best = [cx, cz, cy]; }
       }
@@ -302,7 +305,7 @@ export class Game {
     if (shooter !== this.player) return;
     const kill = victim.state !== 'alive' && wasAlive;
     this.hud.hit(kill, part === 'head');
-    this.audio.play2d(part === 'head' ? 'headshot' : 'hit', { vol: part === 'head' ? 0.35 : 0.45 });
+    if (this.settings.get('hitmarkerSound')) this.audio.play2d(part === 'head' ? 'headshot' : 'hit', { vol: part === 'head' ? 0.35 : 0.45 });
   }
 
   creditKill(killer, victim, weapon, head) {
@@ -313,7 +316,7 @@ export class Game {
     // defend/attack bonus near flags
     for (const f of this.mode.flags) if (Math.hypot(victim.pos.x - f.x, victim.pos.z - f.z) < f.r * 1.5) { this.addScore(killer, 25, f.owner === killer.team ? 'FLAG DEFEND' : 'FLAG ATTACK'); break; }
     for (const [d, amt] of victim.damagers) if (d !== killer && d.team !== victim.team && amt >= 20) { d.stats.assists++; this.addScore(d, 50, 'ASSIST'); }
-    if (killer === this.player) this.audio.play2d('kill', { vol: 0.4 });
+    if (killer === this.player) { this.audio.play2d('kill', { vol: 0.4 }); this.hud.killBanner(victim.name, head, victim.state === 'downed'); }
   }
 
   onDowned(victim, attacker, weapon, head) {

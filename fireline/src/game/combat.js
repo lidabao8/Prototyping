@@ -492,6 +492,7 @@ export class Combat {
   finishAction(s, a) {
     switch (a.name) {
       case 'throw': this.throwGrenade(s, a.data.type, s.throwVel || null); s.throwVel = null; if (s.weapon.kind === 'gadget' && s.weapon.count <= 0) s.switchTo(s.quickReturn ?? 0); if (s.quickReturn !== undefined && s.quickReturn !== null) { const r = s.quickReturn; s.quickReturn = null; s.switchTo(r); } break;
+      case 'melee': this.meleeHit(s); break;
       case 'throwC4': this.throwGrenade(s, 'c4', s.throwVel || null); s.throwVel = null; break;
       case 'bandage': s.bandages--; s.bleed = 0; s.healT += 15; break;
       case 'medkitSelf': s.bleed = 0; s.healT += 50; s.medkitCd = 5; break;
@@ -507,6 +508,40 @@ export class Combat {
         break;
       }
     }
+  }
+
+  // Knife: short cone in front; kills from behind or on downed enemies, heavy damage from the front.
+  melee(s) {
+    if (s.state !== 'alive' || s.actionT > 0 || s.switchT > 0 || s.vault || s.swimming) return false;
+    s.reloadT = 0;
+    s.startAction('melee', 0.34);
+    this.game.audio.play3d('throw', s.pos.x, s.pos.y + 1.4, s.pos.z, { vol: 0.5, maxDist: 20, rate: 1.4 });
+    return true;
+  }
+
+  meleeHit(s) {
+    const eye = s.eye(new THREE.Vector3()), f = s.forward(new THREE.Vector3());
+    let best = null, bd = 2.4;
+    for (const e of this.game.soldiers) {
+      if (e === s || e.team === s.team || e.state === 'dead') continue;
+      const c = e.center(_v);
+      const dx = c.x - eye.x, dz = c.z - eye.z, d = Math.hypot(dx, dz);
+      if (d > bd || Math.abs(c.y - eye.y) > 1.8) continue;
+      if ((dx / d) * f.x + (dz / d) * f.z < 0.55) continue;
+      if (!this.world.collision.los(eye.x, eye.y - 0.3, eye.z, c.x, c.y, c.z)) continue;
+      bd = d; best = e;
+    }
+    if (!best) { this.game.audio.play3d('impactDirt', eye.x, eye.y, eye.z, { vol: 0.15, maxDist: 10 }); return; }
+    const ef = best.forward(_d);
+    const behind = ef.x * f.x + ef.z * f.z > 0.4;
+    const dmg = best.state === 'downed' || behind ? 250 : 80;
+    const wasAlive = best.state === 'alive';
+    const c = best.center(_v);
+    best.takeDamage(dmg, s, 'body', 'Knife', f.clone(), false);
+    this.game.fx.impact(c.x, c.y + 0.2, c.z, -f.x, 0, -f.z, 'flesh');
+    this.game.audio.play3d('impactFlesh', c.x, c.y, c.z, { vol: 0.8, maxDist: 25 });
+    this.game.onHit(s, best, dmg, 'body', wasAlive);
+    if (best.brain) best.brain.onDamaged(s, f);
   }
 
   // Spot enemies near the aim ray for the shooter's team.

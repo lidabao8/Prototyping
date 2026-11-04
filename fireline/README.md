@@ -1,6 +1,6 @@
 # FIRELINE
 
-A 16 vs 16 low-poly infantry shooter for the browser with AI bots. You play alongside 31 AI soldiers in eight four-person squads. There are two maps, three game modes and destructible buildings. Every visual effect can be turned off in the settings.
+A 16 vs 16 low-poly infantry shooter for the browser with AI bots. You play alongside 31 AI soldiers in eight four-person squads. There are four maps (two large, two built for close quarters), three game modes and destructible buildings. Every visual effect can be turned off in the settings, and every key can be rebound.
 
 This game is separate from the other prototypes in this repository. It lives entirely in `fireline/`, has its own build, and needs no asset files: all models, textures and sounds are generated in code when the game starts.
 
@@ -35,6 +35,13 @@ cd fireline && npm install && npm run build
 **Movement**
 - Sprint, slide (crouch while sprinting), crouch, prone, and lean left/right.
 - Vault over low cover, climb ledges, windows and containers, and swim.
+
+**Leaning and positioning**
+- Leaning moves your head and shoulders about 0.6m out while your body stays behind cover, and it steadies your aim slightly while aiming.
+- Bots notice you much more slowly when only your head is exposed, and they can only shoot at the part of you they can see.
+- Lean, crouch and aim can each be set to hold or toggle.
+- Scoped weapons sway. Crouching, going prone, a bipod and leaning all reduce sway; hold Sprint while scoped to hold your breath.
+- Knife melee: a strike from behind or on a downed enemy kills outright.
 
 **Classes and gadgets**
 | Class | Gadgets |
@@ -72,7 +79,7 @@ Bots fill input exactly as the player does: they move, aim and shoot through the
 
 - **Perception:** each bot has a field of view and needs line of sight. Distance, stance, movement, muzzle flashes, night, foliage, smoke and spotting all change how quickly it notices you. Bots hear gunshots and footsteps, react to near misses and incoming damage, and share sightings with their squad.
 - **Aiming:** bots have a reaction time and an initial aim error that shrinks while they track you. They also have aim jitter, which suppression and flashbangs increase. They lead moving targets, compensate for bullet drop, and only partly control recoil (how well depends on difficulty). They fire bursts that suit the distance, tap-fire at range, and switch to the pistol when out of ammo at close range.
-- **Tactics:** bots search the nav grid for cover that hides them crouched but lets them peek standing, then alternate peeking and hiding. In open ground they strafe and crouch-spam. Attackers bound from cover to cover toward the objective, and bots on long-range weapons go prone. They throw grenades at enemies who break line of sight, and use RPGs and launchers on entrenched enemies.
+- **Tactics:** bots search the nav grid for cover that hides them crouched and lets them either peek over it standing or lean around a corner, then alternate peeking and hiding. In open ground they strafe and crouch-spam. Attackers bound from cover to cover toward the objective, and bots on long-range weapons go prone. They throw grenades at enemies who break line of sight, and use RPGs and launchers on entrenched enemies.
 - **Teamwork:** bots revive downed teammates (throwing smoke first if needed), heal each other, place ammo boxes, claymores, sandbags, rally points and beacons, and investigate sounds.
 - **Movement:** A* pathfinding on a 1m grid prefers routes near cover, with path smoothing. Bots keep their spacing, vault low obstacles, recover when stuck, sprint only when it is safe, and glance toward likely threats while moving.
 - **Commander:** each team has a commander that spreads squads across objectives, always keeps at least two squads attacking, and becomes more aggressive when losing.
@@ -81,8 +88,10 @@ Bots fill input exactly as the player does: they move, aim and shoot through the
 ## Maps
 - **Greenhollow** (960 × 960 m, morning): farmland split by a river with two bridges and a ford. Flags are Farmstead, Radio Hill, Mill Bridge (a village), Lumber Mill and Chapel.
 - **Port Kessar** (720 × 720 m, afternoon): a desert harbor town with a dense street grid. Flags are Ridge Outpost, Container Depot, Old Town, Pump Station and Harbor (with piers on the sea).
+- **Ironworks** (440 × 440 m, overcast, close quarters): a foundry with a furnace hall, a rail yard of boxcars, a smelter courtyard and loading docks. Four flags.
+- **Brennhof** (400 × 400 m, dusk, close quarters): a packed old town split by a canal, with narrow streets, a market square, station, brewery, church and town hall. Five flags.
 
-You can switch either map to morning, noon, afternoon, dusk or night. At night, use the flashlight [V].
+You can switch any map to morning, noon, afternoon, dusk, overcast or night. At night, use the flashlight [L].
 
 ## Graphics (each one can be toggled in Settings)
 Quality presets go from Low to Ultra. Individual settings:
@@ -111,18 +120,20 @@ Quality presets go from Low to Ultra. Individual settings:
 - Screen shake and head bob
 
 ## Controls
+Every action can be rebound under **Controls** in the main or pause menu. Defaults:
+
 | Key | Action |
 |---|---|
-| WASD / Shift / Space | Move / sprint / jump, vault, climb |
-| C, Ctrl / Z | Crouch (toggle / hold), slide while sprinting / prone |
+| WASD / Shift / Space | Move / sprint (hold breath when scoped) / jump, vault, climb |
+| C, Ctrl / Z | Crouch (slide while sprinting) / prone |
 | Q / E | Lean |
 | Mouse 1 / Mouse 2 | Fire / aim (Mouse 2 also detonates C4) |
-| R / B | Reload / fire mode |
+| R / B / V | Reload / fire mode / knife |
 | 1–5, wheel / G | Select weapon or gadget / quick grenade |
 | X | Bandage |
 | F (hold) | Revive, or heal with the medkit |
 | T | Spot enemies; squad leaders also give orders |
-| V | Flashlight |
+| L | Flashlight |
 | Tab / M / Esc | Scoreboard / map / pause |
 
 ## Code layout

@@ -34,6 +34,7 @@ function place(g, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, s
 }
 
 export const G = {
+  colorize(g, color) { return colorize(g, color); },
   box(w, h, d, color, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, jitter = 0) {
     return place(colorize(new THREE.BoxGeometry(w, h, d), color, jitter), x, y, z, rx, ry, rz);
   },

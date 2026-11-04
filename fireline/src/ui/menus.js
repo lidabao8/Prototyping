@@ -4,6 +4,18 @@ import { MAPS } from '../world/maps.js';
 import { MODES } from '../game/mode.js';
 import { CLASSES, WEAPONS, ATTACHMENTS, allowedAttachments, weaponsForClass, defaultAttachments, PISTOLS, THROWABLES, GADGETS } from '../data/loadout.js';
 import { TEAM_COLORS } from '../entities/models.js';
+import { keybinds, ACTIONS, keyName } from '../core/keybinds.js';
+import { WeaponPreview } from './showcase.js';
+
+const ICONS = {
+  assault: '<path d="M2 13h13l3-2h4v2h-3l-1 2H9l-1 3H5l1-3H2z"/>',
+  medic: '<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/>',
+  engineer: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/>',
+  support: '<path d="M4 8h16v11H4zM8 5h8v3H8zM7 11h2v5H7zm4 0h2v5h-2zm4 0h2v5h-2z"/>',
+  recon: '<path d="M12 2v4m0 12v4M2 12h4m12 0h4" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="1.5"/>',
+  leader: '<path d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/>',
+};
+const icon = (k) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">${ICONS[k] || ''}</svg>`;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 function h(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
@@ -43,14 +55,22 @@ export class Menus {
   // ---------------- main ----------------
   showMain() {
     this.hideAll();
+    let xp = 0; try { xp = Number(localStorage.getItem('fireline.xp') || 0); } catch (e) { /* ignore */ }
+    const rank = Math.floor(Math.sqrt(xp / 400)) + 1;
     const s = this.screen('main', `
-      <div class="title"><h1>FIRE<span>LINE</span></h1><div class="sub">16 vs 16 · infantry combat · destructible battlefield</div></div>
-      <div class="menu-col">
-        <button class="btn big primary" data-a="play">Play</button>
-        <button class="btn big" data-a="settings">Settings</button>
-        <button class="btn big" data-a="controls">Controls</button>
+      <div class="mm-left">
+        <div class="title"><h1>FIRE<span>LINE</span></h1><div class="sub">16 vs 16 infantry warfare</div></div>
+        <div class="menu-col">
+          <button class="btn big primary" data-a="play">Play</button>
+          <button class="btn big" data-a="settings">Settings</button>
+          <button class="btn big" data-a="controls">Controls</button>
+        </div>
+        <div class="mm-rank"><b>RANK ${rank}</b><span>${xp} XP</span></div>
       </div>
-      <div class="foot">All models, textures and sounds are generated procedurally at runtime.</div>`);
+      <div class="mm-info">
+        <div><b>4</b><span>maps</span></div><div><b>3</b><span>modes</span></div><div><b>31</b><span>AI soldiers</span></div><div><b>6</b><span>classes</span></div>
+      </div>
+      <div class="foot">Every model, texture and sound is generated in code.</div>`);
     s.querySelector('[data-a=play]').onclick = () => this.showSetup();
     s.querySelector('[data-a=settings]').onclick = () => this.showSettings(() => this.showMain());
     s.querySelector('[data-a=controls]').onclick = () => this.showControls(() => this.showMain());
@@ -112,7 +132,7 @@ export class Menus {
       <div class="deploy-left panel">
         <h3>Class</h3><div class="classes"></div>
         <div class="cdesc"></div>
-        <h3>Primary</h3><div class="wlist"></div>
+        <h3>Primary</h3><canvas class="wprev"></canvas><div class="wlist"></div>
         <div class="wstats"></div>
         <div class="atts"></div>
         <h3>Sidearm & equipment</h3>
@@ -142,7 +162,7 @@ export class Menus {
 
   buildClassUI() {
     const s = this.deployEl, lo = this.loadout;
-    s.querySelector('.classes').innerHTML = Object.entries(CLASSES).map(([k, c]) => `<button class="cls${lo.cls === k ? ' on' : ''}" data-c="${k}" style="--cc:${c.color}"><b>${c.name}</b></button>`).join('');
+    s.querySelector('.classes').innerHTML = Object.entries(CLASSES).map(([k, c]) => `<button class="cls${lo.cls === k ? ' on' : ''}" data-c="${k}" style="--cc:${c.color}">${icon(k)}<b>${c.name}</b></button>`).join('');
     s.querySelectorAll('.cls').forEach(b => b.onclick = () => {
       lo.cls = b.dataset.c;
       const list = weaponsForClass(lo.cls);
@@ -177,6 +197,12 @@ export class Menus {
     const s = this.deployEl;
     if (!s || s.style.display === 'none') return;
     const p = game.player;
+    const cv = s.querySelector('.wprev');
+    if (cv) {
+      if (!this.preview || this.preview.canvas !== cv) { if (this.preview && this.preview.renderer) this.preview.renderer.dispose(); this.preview = new WeaponPreview(cv); }
+      this.preview.set(this.loadout.primary, this.loadout.att);
+      this.preview.render(1 / 60);
+    }
     this.spawns = game.spawnOptions(p);
     if (!this.selectedSpawn || !this.spawns.find(x => x.key === this.selectedSpawn.key)) {
       this.selectedSpawn = this.spawns.find(x => x.kind === 'squad') || this.spawns.find(x => x.kind === 'flag') || this.spawns[0];
@@ -192,7 +218,7 @@ export class Menus {
     s.querySelector('.dspawn').textContent = this.selectedSpawn ? `Spawn: ${this.selectedSpawn.label}` : '';
     const k = game.lastDeath;
     s.querySelector('.dkill').innerHTML = k ? `${k.killer ? `Killed by <b style="color:#ff6a5a">${k.killer}</b>` : 'You died'} ${k.weapon ? `· ${k.weapon}` : ''} ${k.dist ? `· ${Math.round(k.dist)}m` : ''}${k.head ? ' · headshot' : ''}` : 'Choose your class, loadout and spawn point.';
-    if (game.input.hit('Space') || game.input.hit('Enter')) this.tryDeploy();
+    if (game.input.hit('Space') || game.input.hit('Enter') || game.input.hit('NumpadEnter')) this.tryDeploy();
   }
 
   tryDeploy() {
@@ -257,8 +283,29 @@ export class Menus {
 
   showControls(back) {
     this.hideAll();
-    const s = this.screen('controls', `<div class="panel"><h2>Controls</h2><div class="ctl">${CONTROLS.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div><div class="btnrow"><button class="btn" data-a="back">Back</button></div></div>`);
-    s.querySelector('[data-a=back]').onclick = back;
+    const conflicts = keybinds.conflicts();
+    let html = '<div class="panel wide controls"><h2>Controls</h2><p class="hint">Click a key to rebind it, then press a key or mouse button. Esc cancels. Mouse wheel always cycles weapons.</p><div class="bindgrid">';
+    for (const a of ACTIONS) {
+      if (a.group) { html += `<h3>${a.group}</h3>`; continue; }
+      const warn = conflicts.has(a.id) && !(['sprint'].includes(a.id));
+      html += `<div class="bind"><span>${a.label}</span><button class="key${warn ? ' warn' : ''}" data-act="${a.id}" title="${warn ? 'Shared with another action' : ''}">${keybinds.name(a.id)}</button></div>`;
+    }
+    html += '</div><div class="btnrow"><button class="btn" data-a="reset">Reset to defaults</button><button class="btn primary" data-a="back">Done</button></div></div>';
+    const s = this.screen('controls', html);
+    let listening = null;
+    const stop = () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('mousedown', onMouse, true); listening = null; };
+    const assign = (code) => { if (!listening) return; keybinds.set(listening, code); stop(); this.app.audio.play2d('ui', { vol: 0.3 }); this.showControls(back); };
+    const onKey = (e) => { e.preventDefault(); e.stopPropagation(); if (e.code === 'Escape') { stop(); this.showControls(back); return; } assign(e.code); };
+    const onMouse = (e) => { if (e.target && e.target.classList && e.target.classList.contains('key') && e.target.dataset.act === listening && e.button === 0 && !this._armed) { this._armed = true; return; } e.preventDefault(); e.stopPropagation(); assign('Mouse' + e.button); };
+    s.querySelectorAll('.key').forEach(b => b.addEventListener('click', () => {
+      if (listening) return;
+      listening = b.dataset.act; this._armed = true;
+      b.textContent = 'Press a key…'; b.classList.add('listen');
+      setTimeout(() => { this._armed = false; window.addEventListener('keydown', onKey, true); window.addEventListener('mousedown', onMouse, true); }, 60);
+    }));
+    s.addEventListener('contextmenu', (e) => e.preventDefault());
+    s.querySelector('[data-a=reset]').onclick = () => { keybinds.reset(); this.showControls(back); };
+    s.querySelector('[data-a=back]').onclick = () => { stop(); back(); };
     s.style.display = 'flex';
   }
 

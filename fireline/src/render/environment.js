@@ -10,6 +10,7 @@ export const TIMES = {
   noon: { elev: 64, az: 160, sun: [1.0, 0.98, 0.94], sunI: 3.8, sky: [0.55, 0.68, 0.94], ground: [0.42, 0.38, 0.3], hemiI: 0.55, fog: [0.66, 0.74, 0.86], fogD: 0.001, turb: 2.4, ray: 1.0, exp: 0.92, skyMul: 0.6, env: 0.35 },
   afternoon: { elev: 26, az: 245, sun: [1.0, 0.86, 0.68], sunI: 3.7, sky: [0.66, 0.68, 0.78], ground: [0.5, 0.42, 0.3], hemiI: 0.55, fog: [0.8, 0.72, 0.6], fogD: 0.0015, turb: 5, ray: 1.4, exp: 0.98, skyMul: 0.62, env: 0.38 },
   dusk: { elev: 6, az: 275, sun: [1.0, 0.6, 0.36], sunI: 2.8, sky: [0.45, 0.42, 0.58], ground: [0.32, 0.24, 0.2], hemiI: 0.45, fog: [0.58, 0.46, 0.42], fogD: 0.0019, turb: 8, ray: 2.4, exp: 1.15, skyMul: 0.7, env: 0.32 },
+  overcast: { elev: 48, az: 150, sun: [0.92, 0.94, 1.0], sunI: 1.7, sky: [0.62, 0.66, 0.72], ground: [0.36, 0.35, 0.33], hemiI: 0.95, fog: [0.6, 0.63, 0.67], fogD: 0.0026, turb: 10, ray: 0.6, exp: 1.05, skyMul: 0.55, env: 0.45 },
   night: { elev: 38, az: 200, sun: [0.55, 0.65, 1.0], sunI: 0.42, sky: [0.12, 0.16, 0.28], ground: [0.05, 0.05, 0.07], hemiI: 0.35, fog: [0.03, 0.04, 0.07], fogD: 0.0032, turb: 2, ray: 0.3, exp: 1.25, skyMul: 0.0, env: 0.12, night: true },
 };
 

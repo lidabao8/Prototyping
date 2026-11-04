@@ -254,10 +254,19 @@ export class NavGrid {
       const tdx = threat.x - cx, tdz = threat.z - cz;
       const td = Math.hypot(tdx, tdz);
       if (opts.minThreatDist && td < opts.minThreatDist) continue;
-      let score = (highOpen ? 3 : 1) - Math.sqrt(d2) * 0.12 + this.cover[c] / 255;
+      // corner cover: can we lean out to one side and see the threat?
+      let lean = null;
+      if (!highOpen && td > 0.1) {
+        const px = -tdz / td, pz = tdx / td;
+        for (const sg of [1, -1]) {
+          const lx = cx + px * sg * 0.6, lz = cz + pz * sg * 0.6;
+          if (this.coll.los(lx, fy + 1.5, lz, threat.x, threat.y, threat.z) && this.coll.los(cx, fy + 1.5, cz, lx, fy + 1.5, lz)) { lean = { x: px * sg, z: pz * sg }; break; }
+        }
+      }
+      let score = (highOpen ? 3 : lean ? 2.7 : 1) - Math.sqrt(d2) * 0.12 + this.cover[c] / 255;
       if (opts.prefer) score -= Math.hypot(cx - opts.prefer.x, cz - opts.prefer.z) * 0.04;
       if (opts.occupied && opts.occupied(cx, cz)) score -= 4;
-      results.push({ x: cx, z: cz, y: fy, peek: highOpen, score });
+      results.push({ x: cx, z: cz, y: fy, peek: highOpen, lean, score });
     }
     results.sort((a, b) => b.score - a.score);
     return results;

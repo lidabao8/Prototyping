@@ -472,6 +472,45 @@ export class Structures {
         for (let i = 0; i < 4; i++) f.decor(G.dodeca(0.4 + rng() * 0.5, 0xa49c90, 0, 0, 0, 1.4, 0.5, 1.1), (rng() - 0.5) * 3, 0.1, (rng() - 0.5) * 3);
         break;
       }
+      case 'chimney': {
+        const h = o.h || 24;
+        f.box('brick', -1.6, -0.5, -1.6, 1.6, h, 1.6, { destructible: false, color: o.color ?? 0xa86a52 });
+        f.decor(G.box(3.8, 0.6, 3.8, 0x6a4a3a, 0, 0, 0), 0, h + 0.3, 0);
+        f.decor(G.box(3.4, 0.4, 3.4, 0x222222, 0, 0, 0), 0, h + 0.8, 0);
+        for (let k = 4; k < h; k += 6) f.decor(G.box(3.5, 0.3, 3.5, 0x8a5a44, 0, 0, 0), 0, k, 0);
+        this.footprint(x, z, rot, 1.6, 1.6, 'rgba(120,80,60,0.95)');
+        break;
+      }
+      case 'platform': {
+        const len = o.len || 30, w = o.w || 5;
+        f.box('concrete', -len / 2, -0.6, -w / 2, len / 2, 0.42, w / 2, { destructible: false, navFloor: true, color: 0xb5b0a6 });
+        f.decor(G.box(len, 0.06, 0.3, 0xd8c040, 0, 0, 0), 0, 0.45, w / 2 - 0.2);
+        for (let k = -len / 2 + 6; k < len / 2; k += 12) { f.box('metal', k - 0.1, 0.42, -0.1, k + 0.1, 3.4, 0.1, { destructible: false, color: 0x55606a }); }
+        f.box('metal', -len / 2, 3.4, -w / 2 + 0.5, len / 2, 3.55, w / 2 - 0.5, { destructible: false, color: 0x6a747c, noStand: true });
+        this.footprint(x, z, rot, len / 2, w / 2, 'rgba(160,155,145,0.95)');
+        break;
+      }
+      case 'fountain': {
+        for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; const fx = Math.cos(a) * 3.2, fz = Math.sin(a) * 3.2; f.box('stone', fx - 1.3, 0, fz - 0.35, fx + 1.3, 0.75, fz + 0.35, { color: 0xc8c0b0, vault: true }); }
+        f.box('stone', -0.5, 0, -0.5, 0.5, 2.2, 0.5, { destructible: false, color: 0xbdb4a2 });
+        f.decor(G.cyl(1.2, 1.0, 0.3, 10, 0xbdb4a2), 0, 2.3, 0);
+        f.decor(G.cyl(2.9, 2.9, 0.1, 16, 0x4a7a8a), 0, 0.4, 0);
+        break;
+      }
+      case 'traincar': {
+        const c = o.color ?? [0x7a3a2a, 0x3a5a6a, 0x5a5a4a][Math.floor(rng() * 3)];
+        f.box('container', -1.4, 0.9, -7, 1.4, 4.0, 7, { color: c, destructible: false });
+        f.box('metal', -1.2, 0.3, -6.5, 1.2, 0.9, 6.5, { color: 0x2a2a2a, destructible: false });
+        for (const wz of [-5, -3.6, 3.6, 5]) for (const wx of [-0.75, 0.75]) f.decor(G.cyl(0.45, 0.45, 0.2, 8, 0x1d1d1d, 0, 0, 0, 0, 0, Math.PI / 2), wx, 0.45, wz);
+        this.footprint(x, z, rot, 1.4, 7, 'rgba(110,70,60,0.95)');
+        break;
+      }
+      case 'rails': {
+        const len = o.len || 100;
+        f.decor(G.box(0.12, 0.12, len, 0x5a5a5a, 0, 0, 0), -0.75, 0.06, 0); f.decor(G.box(0.12, 0.12, len, 0x5a5a5a, 0, 0, 0), 0.75, 0.06, 0);
+        for (let k = -len / 2; k < len / 2; k += 1.2) f.decor(G.box(2.4, 0.08, 0.25, 0x5a4636, 0, 0, 0), 0, 0.02, k);
+        break;
+      }
       case 'pole': f.box('wood', -0.12, 0, -0.12, 0.12, 8, 0.12, { destructible: false, color: 0x5a4a3a }); f.decor(G.box(1.8, 0.12, 0.12, 0x5a4a3a), 0, 7.4, 0); break;
       case 'crane': {
         for (const [lx, lz] of [[-4, -1.5], [4, -1.5], [-4, 1.5], [4, 1.5]]) f.box('metal', lx - 0.3, 0, lz - 0.3, lx + 0.3, 14, lz + 0.3, { destructible: false, color: 0xd8a02a });

@@ -106,9 +106,9 @@ export class BotBrain {
       const fov = dist < 6 ? 140 : (dist < 30 || firing) ? 105 : 62;
       if (dAng > fov) { if (k) k.aw = Math.max(0, k.aw - dt * 0.5); continue; }
       const hs = e.hitSpheres();
-      let los = coll.los(eye.x, eye.y, eye.z, hs[0][0], hs[0][1], hs[0][2]);
-      if (!los) los = coll.los(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2]);
-      if (!los) { if (k) k.aw = Math.max(0, k.aw - dt * 0.4); continue; }
+      const losHead = coll.los(eye.x, eye.y, eye.z, hs[0][0], hs[0][1], hs[0][2]);
+      const losBody = coll.los(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2]) || coll.los(eye.x, eye.y, eye.z, hs[2][0], hs[2][1], hs[2][2]);
+      if (!losHead && !losBody) { if (k) k.aw = Math.max(0, k.aw - dt * 0.4); continue; }
       let vis = clamp(1.25 - dist / (viewDist * 0.8), 0.1, 1.0);
       if (e.stance === 'prone' || e.state === 'downed') vis *= dist > 25 ? 0.35 : 0.7;
       else if (e.stance === 'crouch') vis *= 0.75;
@@ -119,16 +119,21 @@ export class BotBrain {
       if (dAng > 62) vis *= 0.45;
       if (dist > 5) vis *= coll.softVisibility(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2], now);
       if (e.spotUntil > now) vis *= 1.8;
+      if (!losBody) vis *= 0.45; // only a head peeking around cover
       vis *= this.d.sight * (1 - s.suppression * 0.4) * (1 - s.flashed);
       if (vis < 0.02) { if (k) k.aw = Math.max(0, k.aw - dt * 0.4); continue; }
       if (!k) { k = { x: e.pos.x, y: e.pos.y, z: e.pos.z, t: -99, seenT: -99, aw: 0, vis: false }; this.known.set(e, k); }
       const recentlyKnown = now - k.t < 4;
       k.aw = Math.min(1.6, k.aw + vis * dt * (recentlyKnown ? 9 : 4.5));
       if (k.aw >= 1) {
-        k.vis = true; k.x = e.pos.x; k.y = e.pos.y; k.z = e.pos.z; k.t = now; k.seenT = now;
+        k.vis = true; k.x = e.pos.x; k.y = e.pos.y; k.z = e.pos.z; k.t = now; k.seenT = now; k.headOnly = !losBody; k.bodyOnly = !losHead;
         if (e.spotUntil < now && Math.random() < dt * 0.6) e.spotUntil = now + 4;
         if (s.squad) for (const m of s.squad.members) if (m !== s && m.brain && m.state === 'alive' && m.pos.distanceTo(s.pos) < 120) m.brain.inform(e, e.pos.x, e.pos.y, e.pos.z, false, now - 0.4);
       }
+    }
+    // enemies spotted by teammates (markers) are known approximately
+    for (const e of this.game.teams[1 - s.team]) {
+      if (e.state === 'alive' && e.spotUntil > now && !this.known.get(e)?.vis && Math.abs(e.pos.x - s.pos.x) < 220 && Math.abs(e.pos.z - s.pos.z) < 220) this.inform(e, e.pos.x, e.pos.y, e.pos.z, false, now);
     }
     // forget old info
     for (const [e, k] of this.known) if (e.state === 'dead' || (now - k.t > 14 && k.aw < 0.02)) this.known.delete(e);
@@ -185,6 +190,7 @@ export class BotBrain {
     if (this.nextThink <= 0) { this.think(now); this.nextThink = this.d.think * rand(0.8, 1.3); }
     const inp = s.input;
     inp.fire = false; inp.jump = false; inp.sprint = false; inp.mx = 0; inp.mz = 0;
+    this.wantLean = 0;
     let wishX = 0, wishZ = 0, sprint = false, faceMove = true;
     // --- behaviour
     const tk = this.target ? this.known.get(this.target) : null;
@@ -231,6 +237,9 @@ export class BotBrain {
       inp.sprint = sprint && inp.mz < -0.6;
     }
     inp.crouch = this.wantStance === 'crouch';
+    s.leanTarget = this.wantLean;
+    // knife enemies who get too close
+    if (this.target && tk && tk.vis && this.target.state !== 'dead' && s.pos.distanceTo(this.target.pos) < 1.9 && (s.gun ? s.gun.mag === 0 || s.reloadT > 0 || Math.random() < dt * 2 : true)) this.game.combat.melee(s);
     if (this.wantStance === 'prone' && s.stance !== 'prone') inp.prone = true;
     if (this.wantStance !== 'prone' && s.stance === 'prone' && !inp.crouch) { s.setStance(this.wantStance === 'crouch' ? 'crouch' : 'stand'); }
     if (s.swimming) inp.crouch = false;
@@ -421,8 +430,11 @@ export class BotBrain {
           if (!this.peeking && g && g.mag < g.stats.mag * 0.45) s.reload();
         }
         if (s.reloadT > 0 || s.suppression > 0.75 || s.actionT > 0) this.peeking = false;
-        this.wantStance = this.peeking ? (this.cover.peek ? 'stand' : 'crouch') : 'crouch';
-        if (this.peeking && !this.cover.peek) this.wantStance = 'crouch';
+        if (this.cover.peek) this.wantStance = this.peeking ? 'stand' : 'crouch';
+        else if (this.cover.lean) {
+          this.wantStance = this.peeking ? 'stand' : 'crouch';
+          if (this.peeking) { const r = s.right(_b); this.wantLean = (this.cover.lean.x * r.x + this.cover.lean.z * r.z) > 0 ? 1 : -1; }
+        } else this.wantStance = 'crouch';
         return [0, 0, false, false];
       }
       // open ground: strafe / range management
@@ -453,7 +465,15 @@ export class BotBrain {
     if (!this.gadgetTask && since < 4 && dist > 18 && dist < 110 && Math.random() < dt * 0.6 * this.d.nade) this.tryHeavyAt(tk);
     if (this.cover) {
       const dc = Math.hypot(this.cover.x - s.pos.x, this.cover.z - s.pos.z);
-      if (dc < 1 && this.lostT < 3.5) { this.wantStance = this.cover.peek ? 'stand' : 'crouch'; return [0, 0, false, false]; }
+      if (dc < 1 && this.lostT < 6) {
+        // keep peeking: lean out around corner cover or rise over low cover to re-acquire
+        this.peekT -= dt;
+        if (this.peekT <= 0) { this.peeking = !this.peeking; this.peekT = this.peeking ? rand(1.2, 2.4) : rand(0.7, 1.6) + s.suppression; }
+        if (s.reloadT > 0 || s.suppression > 0.75) this.peeking = false;
+        if (this.cover.lean && this.peeking) { const r = s.right(_b); this.wantLean = (this.cover.lean.x * r.x + this.cover.lean.z * r.z) > 0 ? 1 : -1; this.wantStance = 'stand'; }
+        else this.wantStance = this.cover.peek && this.peeking ? 'stand' : 'crouch';
+        return [0, 0, false, false];
+      }
     }
     if (this.lostT < 1.6) { this.wantStance = Math.random() < 0.5 ? 'crouch' : 'stand'; return [0, 0, false, false]; }
     // push or disengage
@@ -570,7 +590,8 @@ export class BotBrain {
       const e = this.target;
       const eye = s.eye(_a);
       const hs = e.hitSpheres();
-      const sp = this.part === 'head' ? hs[0] : hs[1];
+      const part = tk.headOnly ? 'head' : tk.bodyOnly ? 'body' : this.part;
+      const sp = part === 'head' ? hs[0] : hs[1];
       const g = s.gun;
       const vel = g ? g.stats.vel * g.stats.velMul : 800;
       const dist = Math.hypot(sp[0] - eye.x, sp[1] - eye.y, sp[2] - eye.z);
@@ -594,7 +615,7 @@ export class BotBrain {
       // fire decision against true target direction (incl. recoil drift)
       const curY = this.aiYaw + this.recoilOffY, curP = this.aiPitch + this.recoilOff;
       const angErr = Math.hypot(wrapAngle(curY - yawT), curP - pitchT);
-      const radius = this.part === 'head' ? 0.14 : 0.3;
+      const radius = part === 'head' ? 0.14 : 0.3;
       const tol = Math.max(0.35 * DEG, Math.atan(radius / Math.max(dist, 1)) * (dist < 15 ? 2.6 : 1.6));
       this.reactT -= dt;
       fireOk = this.reactT <= 0 && angErr < tol * (this.burstLeft > 0 ? 2.2 : 1);

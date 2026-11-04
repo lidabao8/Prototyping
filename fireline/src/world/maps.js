@@ -372,5 +372,194 @@ const portKessar = {
   },
 };
 
-export const MAPS = { greenhollow, kessar: portKessar };
+// ---------------------------------------------------------------------------------------------
+// Close-quarters maps
+const ironworks = {
+  id: 'ironworks', name: 'Ironworks',
+  desc: 'A shut-down foundry under grey skies. Fight through the furnace hall, a rail yard of boxcars and container lanes, the smelter courtyard and the loading docks.',
+  size: 440, cell: 2, seed: 9091, waterLevel: null, playHalf: 196, biome: 'industrial', time: 'overcast', flatRoofs: true, cqb: true,
+  terrainTextures: ['gravel', 'dirt', 'rock', 'asphalt'],
+  palette: { t0: [0.72, 0.7, 0.66], t1: [0.8, 0.7, 0.6], t2: [0.85, 0.85, 0.85], t3: [1.0, 1.0, 1.05], macro: [0.75, 0.72, 0.66] },
+  mapColors: [[132, 128, 120], [118, 104, 90], [120, 118, 112], [88, 88, 92]],
+  wallColors: [0xb8b4aa, 0xa9a49a, 0xc4bcae, 0x9aa0a4, 0xb0a894],
+  roofColors: [0x6a6e70],
+  grassColor: [0x6a7040, 0x7a8048, 0x8a9050],
+  trees: { types: ['birch', 'oak', 'pine'], weights: [0.5, 0.3, 0.2], scatter: 1 / 9000, bush: 1 / 2500, rock: 1 / 3500 },
+  hq: [{ x: 0, z: -174, r: 24 }, { x: 0, z: 174, r: 24 }],
+  flags: [
+    { id: 'A', name: 'Furnace Hall', x: -62, z: -78, r: 16 },
+    { id: 'B', name: 'Rail Yard', x: 72, z: -52, r: 18 },
+    { id: 'C', name: 'Smelter', x: -66, z: 66, r: 17 },
+    { id: 'D', name: 'Loading Docks', x: 70, z: 82, r: 17 },
+  ],
+  rivers: [],
+  roads: [
+    { points: [[0, -200], [0, 200]], width: 9 },
+    { points: [[-180, 0], [180, 0]], width: 8 },
+    { points: [[-150, -130], [150, -130]], width: 6 }, { points: [[-150, 130], [150, 130]], width: 6 },
+    { points: [[-125, -130], [-125, 130]], width: 6 }, { points: [[125, -130], [125, 130]], width: 6 },
+  ],
+  height(x, z, n, n2) {
+    let h = 4 + 0.8 * n.fbm(x / 120, z / 120, 3);
+    const e = Math.max(Math.abs(x), Math.abs(z));
+    h += smoothstep(170, 215, e) * (12 + 4 * n2.fbm(x / 40, z / 40, 2));
+    return h;
+  },
+  splat(x, z, h, slope, road, riverD, n, pad) {
+    const rock = smoothstep(0.2, 0.36, slope);
+    const asphalt = road * 1.6 + (pad ? 0.7 : 0);
+    const dirt = smoothstep(0.2, 0.6, n(x / 40 + 3, z / 40)) * 0.8;
+    return [Math.max(0.2, 1 - rock - asphalt - dirt * 0.5), dirt, rock, asphalt];
+  },
+  grassDensity(x, z, h, slope, road, riverD, n, w) {
+    return clamp((w[1] / (w[0] + w[1] + w[2] + w[3])) * (1 - road) * 0.7 * (0.3 + 0.7 * n(x / 12, z / 12)), 0, 0.6);
+  },
+  layout(L) {
+    const F = this.flags, rng = L.rng;
+    L.hq(0); L.hq(1);
+    // A: furnace hall, a huge open-sided hall with furnaces inside
+    const A = F[0];
+    L.b('warehouse', A.x, A.z, 0, { w: 13, d: 8, H: 9, gap: 1 }, true);
+    for (const [dx, dz] of [[-12, -4], [0, 4], [12, -4]]) L.p('tank', A.x + dx, A.z + dz, 0, { color: 0x6a5a4a }, 0, 0);
+    L.p('pipe', A.x, A.z - 9, 0, { len: 18 }, 0, 0);
+    L.p('crateStack', A.x - 18, A.z + 9, 0, {}, 0, 0); L.p('crateStack', A.x + 18, A.z + 9, 0, {}, 0, 0);
+    L.p('chimney', A.x - 34, A.z - 6, 0, { h: 28 }, 1.7, 1.7); L.p('chimney', A.x - 34, A.z + 6, 0, { h: 24 }, 1.7, 1.7);
+    L.b('house2', A.x + 36, A.z - 12, 1, { cat: 'concrete', flat: true, w: 4, d: 4, color: 0xb0aca2 });
+    L.b('shed', A.x - 30, A.z + 24, 0, { cat: 'metal' });
+    // B: rail yard, rows of boxcars and container lanes
+    const B = F[1];
+    L.p('rails', B.x - 14, B.z, 1, { len: 140 }); L.p('rails', B.x, B.z, 1, { len: 140 }); L.p('rails', B.x + 14, B.z, 1, { len: 140 });
+    for (const lane of [-14, 0, 14]) for (let i = -2; i <= 2; i++) { if (rng() < 0.25) continue; L.p('traincar', B.x + lane + 0.5, B.z + i * 16, 0, {}, 1.5, 7.2); }
+    for (let i = 0; i < 6; i++) L.p('container', B.x + 30 + (i % 2) * 6, B.z - 24 + Math.floor(i / 2) * 15, 0, { stack: rng() < 0.4 }, 1.3, 3.1);
+    L.b('shop', B.x - 34, B.z - 20, 0, { cat: 'brick', w: 3, d: 3, floors: 1 });
+    L.p('jersey', B.x - 24, B.z + 20, 1, { n: 3 }, 0.4, 3.1); L.p('sandbagRing', B.x + 22, B.z + 28, 2, {}, 2.5, 2);
+    // C: smelter courtyard with tanks, pipes and pump houses
+    const C = F[2];
+    for (const [dx, dz] of [[-10, -10], [10, -10], [-10, 10], [10, 10]]) L.p('tank', C.x + dx, C.z + dz, 0, { color: 0xa8a49a }, 1.7, 1.7);
+    L.p('pipe', C.x, C.z - 10, 0, { len: 16 }, 0, 0); L.p('pipe', C.x, C.z + 10, 0, { len: 16 }, 0, 0); L.p('pipe', C.x - 10, C.z, 1, { len: 16 }, 0, 0);
+    L.b('pumphouse', C.x + 26, C.z - 4, 1, {}, true); L.b('pumphouse', C.x - 28, C.z + 4, 1, {});
+    L.p('chimney', C.x + 2, C.z + 30, 0, { h: 30 }, 1.7, 1.7);
+    L.p('crane', C.x - 8, C.z - 30, 0, {}, 4.4, 1.9);
+    L.p('barrels', C.x + 4, C.z + 2, 0, {}, 1, 0.4); L.p('crateStack', C.x - 3, C.z - 3, 0, {}, 1.3, 0.7);
+    // D: loading docks, a row of warehouses with crates and trucks
+    const D = F[3];
+    L.b('warehouse', D.x - 22, D.z - 8, 1, { w: 8, d: 5, H: 6 }, true); L.b('warehouse', D.x + 22, D.z - 8, 1, { w: 8, d: 5, H: 6 }, true);
+    L.p('platform', D.x, D.z + 18, 0, { len: 40, w: 5 }, 20, 2.5);
+    for (let i = 0; i < 4; i++) L.p('crateStack', D.x - 12 + i * 8, D.z + 4, 0, {}, 1.3, 0.7);
+    L.p('car', D.x - 6, D.z - 6, 1, { color: 0x6a6a5a }, 2.2, 1); L.p('car', D.x + 7, D.z - 2, 0, { color: 0x8a4a2a }, 1, 2.2);
+    for (let i = 0; i < 3; i++) L.p('container', D.x - 8 + i * 8, D.z + 34, 1, { stack: i === 1 }, 3.1, 1.3);
+    // filler: offices, sheds, container stacks, walls
+    const fill = [[-140, -60], [-140, 40], [140, -80], [140, 30], [-20, -100], [30, 100], [-30, 40], [30, -10], [-100, -150], [100, 150], [-100, 150], [100, -150], [40, -90], [-40, 110]];
+    for (const [x, z] of fill) {
+      const t = rng();
+      if (t < 0.35) L.b('house2', x, z, Math.floor(rng() * 4), { cat: 'concrete', flat: true, w: 4, d: 3, color: 0xb4b0a6 });
+      else if (t < 0.6) L.b('warehouse', x, z, Math.floor(rng() * 2), { w: 6, d: 4, H: 6 });
+      else if (t < 0.8) { L.p('container', x, z, 0, { stack: true }, 1.3, 3.1); L.p('container', x + 4, z, 0, {}, 1.3, 3.1); L.p('container', x + 8, z + 2, 0, { stack: rng() < 0.5 }, 1.3, 3.1); }
+      else L.b('ruin', x, z, Math.floor(rng() * 4), { cat: 'brick' });
+    }
+    for (let i = 0; i < 10; i++) { const x = (rng() - 0.5) * 300, z = (rng() - 0.5) * 300; L.p(rng() < 0.5 ? 'hesco' : 'jersey', x, z, Math.floor(rng() * 2), { n: 3 }, 2, 2); }
+    L.line('compoundWall', -150, -40, -150, 40); L.line('compoundWall', 150, -40, 150, 40);
+    // dense industrial filler so no lane is a shooting gallery
+    L.scatter(0, 0, 25, 165, 26, ['warehouse', 'shed', 'house2', 'pumphouse', 'shop'], true, { w: 5, d: 4, cat: 'metal', flat: true, gap: 3 });
+    for (let i = 0; i < 18; i++) {
+      const a = rng() * Math.PI * 2, r = 30 + rng() * 140;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (L.roadDist(x, z) < 6) continue;
+      const rot = rng() < 0.5 ? 0 : 1;
+      L.p('container', x, z, rot, { stack: rng() < 0.35 }, rot ? 3.2 : 1.4, rot ? 1.4 : 3.2);
+      if (rng() < 0.6) L.p('crateStack', x + (rot ? 0 : 3), z + (rot ? 3 : 0), 0, {}, 1.3, 0.7);
+    }
+    L.forests = [[-175, -170, 18], [175, 170, 18], [175, -100, 14], [-175, 100, 14]];
+    for (const f of F) L.noTree.push({ x: f.x, z: f.z, r: f.r * 1.4 });
+  },
+};
+
+const brennhof = {
+  id: 'brennhof', name: 'Brennhof',
+  desc: 'A tight old town split by a canal. Narrow streets and alleys, a market square, the train station, a brewery, the church and town hall. Every corner is a fight.',
+  size: 400, cell: 2, seed: 7171, waterLevel: 0, playHalf: 178, biome: 'temperate', time: 'dusk', cqb: true,
+  terrainTextures: ['grass', 'dirt', 'rock', 'gravel'],
+  palette: { t0: [0.55, 0.75, 0.32], t1: [1.0, 0.86, 0.68], t2: [0.95, 0.95, 0.95], t3: [1.05, 1.02, 0.98], macro: [0.95, 0.92, 0.6] },
+  mapColors: [[104, 136, 70], [146, 124, 96], [132, 130, 124], [150, 146, 138]],
+  wallColors: [0xe8e0d0, 0xe0c8a8, 0xd8d0c0, 0xc8d4d0, 0xe8d8b8, 0xd8b8a0, 0xf0e8d8, 0xc0b8a8],
+  roofColors: [0x8a3a2e, 0x7b4a36, 0x5a4c44, 0x6a3a30, 0x4f5a66],
+  grassColor: [0x587a30, 0x6e943a, 0x8cae50],
+  trees: { types: ['oak', 'birch', 'pine'], weights: [0.6, 0.3, 0.1], scatter: 1 / 6000, bush: 1 / 2200, rock: 1 / 6000 },
+  hq: [{ x: 0, z: -158, r: 22 }, { x: 0, z: 158, r: 22 }],
+  flags: [
+    { id: 'A', name: 'Station', x: -78, z: -112, r: 16 },
+    { id: 'B', name: 'Brewery', x: 76, z: -98, r: 15 },
+    { id: 'C', name: 'Canal Bridge', x: 0.5, z: 5, r: 15 },
+    { id: 'D', name: 'Church', x: -74, z: 102, r: 16 },
+    { id: 'E', name: 'Town Hall', x: 76, z: 108, r: 15 },
+  ],
+  rivers: [{ points: [[-220, 5], [-80, 2], [0, 5], [80, 8], [220, 5]], width: 14, depth: 2.6, bankSlope: 0.9 }],
+  roads: [
+    { points: [[0, -190], [0, -8]], width: 8 }, { points: [[0, 18], [0, 190]], width: 8 },
+    { points: [[-170, -60], [170, -60]], width: 7 }, { points: [[-170, 66], [170, 66]], width: 7 },
+    { points: [[-60, -170], [-60, -8]], width: 6 }, { points: [[60, -170], [60, -8]], width: 6 },
+    { points: [[-60, 18], [-60, 170]], width: 6 }, { points: [[60, 18], [60, 170]], width: 6 },
+    { points: [[-120, -170], [-120, 170]], width: 5 }, { points: [[120, -170], [120, 170]], width: 5 },
+    { points: [[-170, -125], [170, -125]], width: 5 }, { points: [[-170, 130], [170, 130]], width: 5 },
+  ],
+  height(x, z, n, n2) {
+    let h = 3.2 + 0.6 * n.fbm(x / 140, z / 140, 3);
+    const e = Math.max(Math.abs(x), Math.abs(z));
+    h += smoothstep(160, 198, e) * (14 + 5 * n2.fbm(x / 40, z / 40, 2));
+    return h;
+  },
+  splat(x, z, h, slope, road, riverD, n, pad) {
+    const rock = smoothstep(0.22, 0.4, slope);
+    const cobble = road * 1.6 + (pad ? 0.6 : 0) + (1 - smoothstep(4, 8, riverD)) * 1.2;
+    const dirt = smoothstep(0.35, 0.65, n(x / 30, z / 30)) * 0.5;
+    return [Math.max(0.05, 1 - rock - cobble - dirt), dirt, rock, cobble];
+  },
+  grassDensity(x, z, h, slope, road, riverD, n, w) {
+    return clamp((w[0] / (w[0] + w[1] + w[2] + w[3])) * (1 - road) * (0.5 + 0.5 * n(x / 18, z / 18)), 0, 1);
+  },
+  layout(L) {
+    const F = this.flags, rng = L.rng;
+    L.hq(0); L.hq(1);
+    L.bridges.push({ x: 0.5, z: 5.5, len: 26, w: 8 }, { x: -89.5, z: 2.5, len: 24, w: 6 }, { x: 90.5, z: 8.5, len: 24, w: 6 });
+    for (const b of L.bridges) L.fps.push({ minX: b.x - b.w / 2 - 1, maxX: b.x + b.w / 2 + 1, minZ: b.z - b.len / 2, maxZ: b.z + b.len / 2 });
+    // quay walls along the canal
+    for (const side of [-1, 1]) for (let x = -165; x < 165; x += 12) { if (Math.abs(x) < 8 || Math.abs(x + 90) < 8 || Math.abs(x - 90) < 8) continue; L.p('stoneWall', x, 5 + side * 10, 0, { n: 3 }); }
+    // flags
+    const A = F[0], B = F[1], D = F[3], E = F[4];
+    L.b('warehouse', A.x, A.z - 12, 0, { cat: 'brick', w: 12, d: 4, H: 6, color: 0xb87a5a }, true);
+    L.p('platform', A.x, A.z + 2, 0, { len: 44, w: 5 }, 22, 2.5);
+    L.p('rails', A.x, A.z + 9, 0, { len: 150 }); L.p('traincar', A.x - 14, A.z + 9, 1, {}, 7.2, 1.5); L.p('traincar', A.x + 16, A.z + 9, 1, {}, 7.2, 1.5);
+    L.b('warehouse', B.x, B.z - 6, 1, { cat: 'brick', w: 8, d: 6, H: 7, color: 0xa86a4a }, true);
+    for (const [dx, dz] of [[14, 8], [18, -2], [14, -12]]) L.p('tank', B.x + dx, B.z + dz, 0, { color: 0xb08a5a }, 1.7, 1.7);
+    L.p('barrels', B.x - 12, B.z + 10, 0, {}, 1, 0.4); L.p('crateStack', B.x - 14, B.z - 2, 0, {}, 1.3, 0.7);
+    L.b('church', D.x, D.z + 4, 0, {}, true);
+    for (let gx = 0; gx < 3; gx++) for (let gz = 0; gz < 4; gz++) L.p('grave', D.x + 16 + gx * 3, D.z + gz * 3.2, 0, {}, 0.4, 0.2);
+    L.b('house2', E.x, E.z - 6, 0, { cat: 'brick', w: 7, d: 5, color: 0xd8b898 }, true);
+    L.p('fountain', E.x - 2, E.z + 12, 0, {}, 4, 4);
+    L.p('fountain', -30, -40, 0, {}, 4, 4);
+    // market square stalls north of the central bridge
+    for (let i = 0; i < 5; i++) L.p('stall', -14 + i * 7, -30, 0, {}, 1.7, 1.3);
+    L.p('sandbags', 0, -14, 0, { n: 3 }, 1.6, 0.4); L.p('sandbags', 0, 24, 0, { n: 3 }, 1.6, 0.4);
+    L.p('car', 10, -22, 1, {}, 2.2, 1); L.p('car', -12, 30, 0, {}, 1, 2.2);
+    // town blocks: houses packed around each street block
+    const xs = [-170, -120, -60, 0, 60, 120, 170], zs = [-170, -125, -60, -8, 18, 66, 130, 170];
+    for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < zs.length - 1; j++) {
+      if (zs[j] === -8) continue; // canal band
+      const x0 = xs[i] + 4, x1 = xs[i + 1] - 4, z0 = zs[j] + 4, z1 = zs[j + 1] - 4;
+      if (x1 - x0 < 10 || z1 - z0 < 10) continue;
+      const cols = Math.max(1, Math.floor((x1 - x0) / 13)), rows = Math.max(1, Math.floor((z1 - z0) / 13));
+      for (let a = 0; a < cols; a++) for (let c = 0; c < rows; c++) {
+        if (rng() < 0.12) continue;
+        const cx = x0 + (a + 0.5) * (x1 - x0) / cols, cz = z0 + (c + 0.5) * (z1 - z0) / rows;
+        const w = 3 + Math.floor(rng() * 2), d = 3 + Math.floor(rng() * 2);
+        L.b(rng() < 0.55 ? 'house2' : 'house', cx, cz, Math.floor(rng() * 4) & 2, { w, d, gap: 1.6, roadGap: 0.6 });
+      }
+      if (rng() < 0.5) L.p(rng() < 0.5 ? 'crateStack' : 'barrels', (x0 + x1) / 2 + rng() * 4, (z0 + z1) / 2, 0, {}, 1.3, 0.7);
+    }
+    L.forests = [[-150, -150, 14], [150, 150, 14], [150, -150, 12], [-150, 150, 12], [-30, -40, 8]];
+    for (const f of F) L.noTree.push({ x: f.x, z: f.z, r: f.r * 1.2 });
+  },
+};
+
+export const MAPS = { greenhollow, kessar: portKessar, ironworks, brennhof };
 export { coastX };

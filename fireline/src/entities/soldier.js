@@ -44,6 +44,7 @@ export class Soldier {
     this.deathPose = 0; this.deathDir = 1; this.deadTime = 0;
     this.stepAcc = 0;
     this.healT = 0; this.bandages = 4; this.medkitCd = 0;
+    this.swayP = 0; this.swayY = 0; this.holdingBreath = false;
   }
 
   get alive() { return this.state === 'alive'; }
@@ -98,20 +99,22 @@ export class Soldier {
   syncWeaponModel() {
     const w = this.weapon;
     if (!this.rig || !w) return;
-    setRigWeapon(this.rig, w.kind === 'gun' ? w.model.geo : w.model);
+    const pose = w.kind === 'gun' ? (w.model.pistol ? 'pistol' : 'rifle') : (w.id === 'rpg' || w.id === 'm320' ? 'rifle' : 'gadget');
+    setRigWeapon(this.rig, w.kind === 'gun' ? w.model.geo : w.model, pose);
   }
 
   // --- geometry helpers ---
   eye(out = new THREE.Vector3()) {
     const r = this.right();
-    out.set(this.pos.x + r.x * this.lean * 0.42, this.pos.y + this.eyeH - Math.abs(this.lean) * 0.08, this.pos.z + r.z * this.lean * 0.42);
+    out.set(this.pos.x + r.x * this.lean * 0.58, this.pos.y + this.eyeH - Math.abs(this.lean) * 0.1, this.pos.z + r.z * this.lean * 0.58);
     return out;
   }
   forward(out = new THREE.Vector3()) { return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); }
   right(out = new THREE.Vector3()) { return out.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)); }
   aimDir(out = new THREE.Vector3()) {
-    const cp = Math.cos(this.pitch);
-    return out.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
+    const p = this.pitch + this.swayP, y = this.yaw + this.swayY;
+    const cp = Math.cos(p);
+    return out.set(-Math.sin(y) * cp, Math.sin(p), -Math.cos(y) * cp);
   }
   center(out = new THREE.Vector3()) { return out.set(this.pos.x, this.pos.y + this.bodyH * 0.6, this.pos.z); }
   headPos(out = new THREE.Vector3()) {
@@ -122,7 +125,7 @@ export class Soldier {
   // [x,y,z,r,part]
   hitSpheres() {
     const p = this.pos, f = this.forward(_f), r = this.right(_r);
-    const L = this.lean * 0.35;
+    const L = this.lean * 0.5;
     const S = this._hs || (this._hs = [[0, 0, 0, 0, 'head'], [0, 0, 0, 0, 'body'], [0, 0, 0, 0, 'body'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg']]);
     const set = (i, fx, y, sx, rad) => { S[i][0] = p.x + f.x * fx + r.x * sx; S[i][1] = p.y + y; S[i][2] = p.z + f.z * fx + r.z * sx; S[i][3] = rad; };
     if (this.state === 'downed' || this.state === 'dead' || this.stance === 'prone') {
@@ -316,6 +319,7 @@ export class Soldier {
     else if (this.stance === 'prone') base *= 0.6;
     if (!this.move.grounded) base *= 2.5;
     base += this.bloom * (this.adsT > 0.5 ? 0.35 : 1);
+    if (Math.abs(this.lean) > 0.5 && this.adsT > 0.5) base *= 0.85; // braced against cover
     if (s.type === 'sniper' && this.adsT > 0.95) base = 0.0;
     return base;
   }
@@ -509,8 +513,29 @@ export class Soldier {
 
   heal(amount) { this.hp = Math.min(100, this.hp + amount); }
 
+  // Scope sway (player only): stance, bipod, breath and suppression all matter.
+  updateSway(dt, now) {
+    const g = this.gun;
+    const scoped = this.isPlayer && g && this.adsT > 0.3 && (g.stats.zoom >= 3.5 || g.stats.type === 'sniper' || g.stats.type === 'dmr');
+    let A = 0;
+    if (scoped) {
+      A = (g.stats.type === 'sniper' ? 0.55 : 0.35) * Math.PI / 180;
+      if (this.stance === 'crouch') A *= 0.6; else if (this.stance === 'prone') A *= 0.3;
+      if (g.stats.bipod && this.stance !== 'stand') A *= 0.4;
+      if (Math.abs(this.lean) > 0.5) A *= 0.7;
+      if (Math.hypot(this.vel.x, this.vel.z) > 0.5) A *= 1.8;
+      if (this.holdingBreath) A *= 0.08;
+      A *= 1 + this.suppression * 2.5;
+    }
+    const ty = Math.sin(now * 0.83) * A + Math.sin(now * 2.1 + 1) * A * 0.35;
+    const tp = Math.sin(now * 1.37 + 2) * A * 0.8 + Math.sin(now * 2.9) * A * 0.25;
+    const k = 1 - Math.exp(-dt * 6);
+    this.swayY += (ty - this.swayY) * k; this.swayP += (tp - this.swayP) * k;
+  }
+
   // per-frame non-movement update (health, bleeding, timers)
   updateVitals(dt, now) {
+    this.updateSway(dt, now);
     if (this.spawnProtect > 0) { this.spawnProtect -= dt; if (this.input.fire || Math.hypot(this.vel.x, this.vel.z) > 2) this.spawnProtect = Math.min(this.spawnProtect, 0.5); }
     this.suppression = Math.max(0, this.suppression - dt * 0.35);
     this.flashed = Math.max(0, this.flashed - dt * 0.4);
@@ -540,57 +565,124 @@ export class Soldier {
     if (far && (this.id + this.game.frame) % 3 !== 0 && this.state === 'alive') { rig.root.position.copy(this.pos); rig.root.rotation.y = this.yaw; return; }
     const castShadow = d2 < 90 * 90;
     if (castShadow !== this._cs) { this._cs = castShadow; rig.root.traverse(o => { if (o.isMesh) o.castShadow = castShadow; }); }
-    const k = Math.min(1, dt * 12);
     rig.root.position.copy(this.pos);
     rig.root.rotation.y = this.yaw;
-    const hs = Math.hypot(this.vel.x, this.vel.z);
-    const amp = Math.min(1, hs / 4);
-    const ph = this.walkPhase;
-    let hipsY = 0.95, hipsRX = 0, torsoRX = this.pitch * 0.3, aimRX = this.pitch * 0.7, torsoRZ = -this.lean * 0.4;
-    let thighL = 0, thighR = 0, shinL = 0, shinR = 0, armLR = 0, weapRZ = 0, rootRX = 0, headRX = 0;
-    let hipsZ = 0;
-    if (this.state === 'downed') {
-      hipsY = 0.22; hipsRX = 1.45; torsoRX = -0.2; aimRX = -1.2; thighL = -0.2; thighR = 0.15; shinL = 0.4; shinR = 0.2; headRX = -0.6; torsoRZ = Math.sin(this.downedTime * 3) * 0.05;
-    } else if (this.state === 'dead') {
-      this.deathPose = Math.min(1, this.deathPose + dt * 2.6);
-      const p = this.deathPose;
-      hipsY = lerp(0.95, 0.18, p); hipsRX = lerp(0, 1.5 * this.deathDir, p); torsoRX = 0; aimRX = lerp(this.pitch, -1.4, p);
-      thighL = lerp(0, 0.3, p); thighR = lerp(0, -0.2, p); shinL = 0.3 * p; headRX = 0.3 * p; torsoRZ = 0.3 * p * this.deathDir;
-    } else if (this.stance === 'prone') {
-      hipsY = 0.22; hipsRX = -1.42; aimRX = 1.42 + this.pitch * 0.8; torsoRX = 0; headRX = 1.1;
-      const c = Math.sin(ph * 1.5) * amp;
-      thighL = 0.1 + c * 0.25; thighR = 0.1 - c * 0.25; shinL = 0.2; shinR = 0.2; hipsZ = 0.0;
-    } else if (this.stance === 'crouch') {
-      hipsY = 0.62; hipsRX = 0.12;
-      thighL = -1.1 + Math.sin(ph) * 0.35 * amp; thighR = -0.5 - Math.sin(ph) * 0.35 * amp;
-      shinL = 1.7; shinR = 1.25; torsoRX += 0.12; aimRX -= 0.12;
-    } else {
-      const s = Math.sin(ph), c = Math.cos(ph);
-      const sw = this.sprinting ? 0.85 : 0.55;
-      thighL = s * sw * amp; thighR = -s * sw * amp;
-      shinL = Math.max(0, -c) * 1.0 * amp + 0.05; shinR = Math.max(0, c) * 1.0 * amp + 0.05;
-      hipsY = 0.95 + Math.abs(c) * 0.04 * amp;
-      if (this.sprinting) { aimRX = -0.75; torsoRX = 0.18; weapRZ = 0.6; hipsRX = 0.1; }
-      if (!this.move.grounded && !this.swimming) { thighL = -0.6; thighR = -0.2; shinL = 0.9; shinR = 0.6; }
-      if (this.swimming) { hipsY = 0.95; thighL = s * 0.4; thighR = -s * 0.4; aimRX = -0.4; }
+    const A = this.anim || (this.anim = { phase: 0, legYaw: 0, lastYaw: this.yaw, shuffle: 0, throwT: 0, meleeT: 0, death: null });
+    const t = this.game.time;
+    // local-space velocity -> gait
+    const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw), rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    const vf = this.vel.x * fx + this.vel.z * fz, vr = this.vel.x * rx + this.vel.z * rz;
+    const hs = Math.hypot(vf, vr);
+    const back = vf < -0.4;
+    const yawRate = wrapAngle(this.yaw - A.lastYaw) / Math.max(dt, 1e-3); A.lastYaw = this.yaw;
+    let legTarget = 0;
+    if (hs > 0.5 && this.stance !== 'prone' && this.state === 'alive') {
+      let a = Math.atan2(vr, vf);
+      if (Math.abs(a) > Math.PI / 2) a = wrapAngle(a - Math.PI);
+      legTarget = -Math.max(-1.05, Math.min(1.05, a));
     }
-    if (this.reloadT > 0) { armLR = Math.sin(this.game.time * 9) * 0.35 - 0.5; weapRZ += 0.35; }
-    if (this.action) { armLR = -0.9; aimRX -= 0.25; }
-    rig.hips.position.y = damp(rig.hips.position.y, hipsY, 12, dt);
-    rig.hips.position.z = hipsZ;
-    rig.hips.rotation.x += (hipsRX - rig.hips.rotation.x) * k;
-    rig.torso.rotation.x += (torsoRX - rig.torso.rotation.x) * k;
-    rig.torso.rotation.z += (torsoRZ - rig.torso.rotation.z) * k;
-    rig.aim.rotation.x += (aimRX - rig.aim.rotation.x) * k;
-    rig.head.rotation.x += (headRX - rig.head.rotation.x) * k;
-    rig.armL.rotation.x += (armLR - rig.armL.rotation.x) * k;
-    rig.weapon.rotation.z += (weapRZ - rig.weapon.rotation.z) * k;
+    A.legYaw = damp(A.legYaw, legTarget, 9, dt);
+    const stride = this.stance === 'crouch' ? 2.7 : this.sprinting ? 1.45 : this.stance === 'prone' ? 3.2 : 2.05;
+    A.phase += hs * dt * stride * (back ? -1 : 1);
+    if (hs < 0.4 && Math.abs(yawRate) > 1.2 && this.state === 'alive' && this.stance !== 'prone') { A.shuffle = Math.min(1, A.shuffle + dt * 6); A.phase += dt * 7; }
+    else A.shuffle = Math.max(0, A.shuffle - dt * 4);
+    const s = Math.sin(A.phase), c = Math.cos(A.phase);
+    const amp = Math.max(Math.min(1, hs / (this.sprinting ? 6 : this.stance === 'crouch' ? 2.4 : 4)), A.shuffle * 0.35);
+    // targets
+    let bodyY = 0.95, bodyRX = 0, bodyRZ = 0, bodyX = this.lean * 0.12;
+    let spineRX = this.pitch * 0.25, spineRY = -A.legYaw * 0.85, spineRZ = -this.lean * 0.42;
+    let headRX = this.pitch * 0.3, aimRX = this.pitch * 0.72, aimRY = 0;
+    let armRX = 0, armRZ = 0, armLX = 0, armLZ = 0, wRX = 0, wRZ = 0, wZ = 0;
+    let tL = 0, tR = 0, kL = 0, kR = 0, tLz = 0, tRz = 0;
+    if (this.state === 'dead') {
+      if (!A.death) A.death = { dir: this.deathDir, roll: (Math.random() - 0.5) * 0.8, arms: Math.random() };
+      this.deathPose = Math.min(1, this.deathPose + dt * 2.2);
+      const p = this.deathPose, e = 1 - Math.pow(1 - p, 3);
+      const D = A.death;
+      bodyY = lerp(0.95, 0.17, e); bodyRX = 1.52 * D.dir * e; bodyRZ = D.roll * e;
+      spineRX = 0.15 * e; spineRY = 0; spineRZ = D.roll * 0.3 * e; headRX = (D.dir > 0 ? -0.5 : 0.6) * e;
+      aimRX = lerp(this.pitch, D.dir > 0 ? 1.2 : -1.3, e); armRZ = -0.6 * e * D.arms; armLZ = 0.7 * e;
+      tL = 0.25 * e; tR = -0.15 * e; kL = -0.4 * e; kR = -0.15 * e; tLz = 0.15 * e; tRz = -0.1 * e;
+      wRZ = 1.2 * e;
+    } else if (this.state === 'downed') {
+      const w = Math.sin(this.downedTime * 2.4) * 0.06;
+      bodyY = 0.2; bodyRX = 1.48; bodyRZ = 0.2 + w;
+      spineRX = -0.25; spineRY = 0; headRX = -0.7; aimRX = -0.9 + w; aimRY = 0.4;
+      armLX = -0.6; armLZ = 0.4; armRX = -0.3;
+      tL = 0.45 + w; kL = -0.9; tR = 0.15; kR = -0.35; tLz = 0.1; tRz = -0.12;
+      wRZ = 1.3;
+    } else if (this.stance === 'prone') {
+      bodyY = 0.2; bodyRX = -1.47; spineRX = 0; spineRY = 0; headRX = 1.15 + this.pitch * 0.4; aimRX = 1.47 + this.pitch * 0.8;
+      const cr = s * amp;
+      tL = 0.05 + cr * 0.3; tR = 0.05 - cr * 0.3; kL = -0.15 - Math.max(0, cr) * 0.9; kR = -0.15 - Math.max(0, -cr) * 0.9;
+      tLz = 0.18; tRz = -0.18; bodyRZ = cr * 0.05;
+      armLX = cr * 0.15; armRX = -cr * 0.15;
+    } else if (this.stance === 'crouch') {
+      // kneel on the left knee, right foot planted; blend to a crouch-walk when moving
+      const kneel = 1 - amp;
+      bodyY = lerp(0.66, 0.62, kneel); bodyRX = -0.08;
+      tL = lerp(0.9 + s * 0.45, 0.25, kneel); kL = lerp(-1.35 - Math.max(0, c) * 0.5, -1.75, kneel);
+      tR = lerp(0.9 - s * 0.45, 1.1, kneel); kR = lerp(-1.35 - Math.max(0, -c) * 0.5, -1.65, kneel);
+      spineRX += 0.08; aimRX -= 0.08;
+      bodyY += -Math.abs(s) * 0.02 * amp;
+    } else {
+      const swing = this.sprinting ? 0.8 : 0.48;
+      tL = s * swing * amp; tR = -s * swing * amp;
+      kL = -(Math.max(0, c) * (this.sprinting ? 1.4 : 0.95) + 0.06) * amp;
+      kR = -(Math.max(0, -c) * (this.sprinting ? 1.4 : 0.95) + 0.06) * amp;
+      bodyY = 0.95 - Math.abs(Math.sin(A.phase)) * 0.035 * amp + (this.sprinting ? -0.03 : 0);
+      bodyRZ = s * 0.03 * amp;
+      if (this.sprinting) {
+        spineRX = -0.22; aimRX = -0.75; aimRY = 0.55; wRZ = 0.9; wRX = 0.2; headRX = 0.15;
+        armRX = s * 0.25; armLX = -s * 0.25;
+      } else spineRY += s * 0.04 * amp;
+      if (this.slideT > 0) { bodyY = 0.5; bodyRX = 0.35; tL = 1.25; kL = -0.3; tR = 0.5; kR = -1.4; spineRX = -0.1; aimRX = this.pitch * 0.7 - 0.35; }
+      if (!this.move.grounded && !this.swimming && !this.vault) { tL = 0.75; kL = -1.15; tR = 0.15; kR = -0.6; }
+      if (this.vault) { tL = 1.2; kL = -1.6; tR = 0.8; kR = -1.2; bodyRX = -0.2; aimRX = -0.5; }
+      if (this.swimming) { bodyY = 0.95; tL = s * 0.4; tR = -s * 0.4; kL = -0.3; kR = -0.3; aimRX = -0.5; armRX = c * 0.4; armLX = -c * 0.4; }
+    }
+    if (this.state === 'alive') {
+      // reload: left hand to the magazine and back, weapon tilted
+      if (this.reloadT > 0) {
+        const tot = this.reloadTotal || 2, k2 = 1 - this.reloadT / tot;
+        const dip = k2 < 0.25 ? k2 / 0.25 : k2 < 0.65 ? 1 : k2 < 0.85 ? 1 - (k2 - 0.65) / 0.2 : 0;
+        armLX = -0.55 * dip; armLZ = 0.25 * dip; wRZ += 0.45 * Math.sin(Math.min(1, k2) * Math.PI); wRX += 0.15 * dip;
+        aimRX -= 0.18 * Math.sin(Math.min(1, k2) * Math.PI);
+      }
+      if (this.action) {
+        const k2 = 1 - this.actionT / (this.actionDur || 1);
+        if (this.action.name === 'throw' || this.action.name === 'throwC4') {
+          const wind = k2 < 0.55 ? k2 / 0.55 : 1 - (k2 - 0.55) / 0.45;
+          armRX = 2.6 * wind - 0.6 * (1 - wind) * (k2 > 0.55 ? 1 : 0); armRZ = -0.3 * wind; aimRX = this.pitch * 0.7 - 0.3; wZ = 0.2;
+          spineRY += 0.35 * wind;
+        } else if (this.action.name === 'melee') {
+          const sw = Math.sin(Math.min(1, k2 * 1.6) * Math.PI);
+          aimRY = -0.6 * sw; wZ = -0.25 * sw; spineRY += -0.4 * sw;
+        } else { armLX = -0.9; armRX = -0.5; aimRX -= 0.6; wRZ += 0.8; }
+      }
+      if (this.reviveProgress > 0) { aimRX = -1.1; armLX = -0.4; armRX = -0.3; wRZ = 1.0; }
+      // firing kick
+      const since = t - this.lastShotTime;
+      if (since < 0.08) { wZ += 0.05 * (1 - since / 0.08); aimRX += 0.04 * (1 - since / 0.08); }
+    }
+    const k = 1 - Math.exp(-dt * (this.state === 'dead' ? 30 : 15));
+    const ap = (o, prop, v) => { o[prop] += (v - o[prop]) * k; };
+    ap(rig.body.position, 'y', bodyY); ap(rig.body.position, 'x', bodyX);
+    ap(rig.body.rotation, 'x', bodyRX); ap(rig.body.rotation, 'z', bodyRZ);
+    ap(rig.pelvis.rotation, 'y', A.legYaw * (this.stance === 'prone' || this.state !== 'alive' ? 0 : 1));
+    ap(rig.spine.rotation, 'x', spineRX); ap(rig.spine.rotation, 'y', spineRY); ap(rig.spine.rotation, 'z', spineRZ);
+    ap(rig.head.rotation, 'x', headRX);
+    ap(rig.aim.rotation, 'x', aimRX); ap(rig.aim.rotation, 'y', aimRY);
+    ap(rig.armR.rotation, 'x', armRX); ap(rig.armR.rotation, 'z', armRZ);
+    ap(rig.armL.rotation, 'x', armLX); ap(rig.armL.rotation, 'z', armLZ);
+    ap(rig.weapon.rotation, 'x', wRX); ap(rig.weapon.rotation, 'z', wRZ);
+    const baseZ = rig.pose === 'pistol' ? -0.42 : rig.pose === 'gadget' ? -0.3 : -0.33;
+    ap(rig.weapon.position, 'z', baseZ + wZ);
     const L = rig.legs;
-    L[0].thigh.rotation.x += (thighL - L[0].thigh.rotation.x) * k; L[1].thigh.rotation.x += (thighR - L[1].thigh.rotation.x) * k;
-    L[0].shin.rotation.x += (shinL - L[0].shin.rotation.x) * k; L[1].shin.rotation.x += (shinR - L[1].shin.rotation.x) * k;
-    rig.root.rotation.x = rootRX;
-    // recoil kick on model
-    if (this.game.time - this.lastShotTime < 0.06) rig.weapon.position.z = -0.30; else rig.weapon.position.z = damp(rig.weapon.position.z, -0.34, 20, dt);
+    ap(L[0].thigh.rotation, 'x', tL); ap(L[1].thigh.rotation, 'x', tR);
+    ap(L[0].thigh.rotation, 'z', tLz); ap(L[1].thigh.rotation, 'z', tRz);
+    ap(L[0].shin.rotation, 'x', kL); ap(L[1].shin.rotation, 'x', kR);
+    if (this.state !== 'dead') A.death = null;
   }
 
   muzzleWorld(out = new THREE.Vector3()) {

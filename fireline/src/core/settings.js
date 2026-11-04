@@ -32,7 +32,7 @@ export const DEFAULTS = Object.assign({
   preset: 'high',
   fov: 95, sensitivity: 1.0, adsSensitivity: 0.85, invertY: false,
   volume: 0.8, musicVolume: 0.5, showFps: true, screenShake: true, headBob: true,
-  difficulty: 'veteran', crosshair: true, nameTags: true,
+  difficulty: 'veteran', crosshair: true, nameTags: true, crouchMode: 'toggle', adsMode: 'hold', leanMode: 'hold', hitmarkerSound: true,
 }, PRESETS.high);
 
 // Describes the settings UI. type: bool | select | range
@@ -77,6 +77,10 @@ export const SETTINGS_SCHEMA = [
   { key: 'sensitivity', label: 'Mouse sensitivity', type: 'range', min: 0.1, max: 3, step: 0.05 },
   { key: 'adsSensitivity', label: 'ADS sensitivity', type: 'range', min: 0.2, max: 1.5, step: 0.05 },
   { key: 'invertY', label: 'Invert Y', type: 'bool' },
+  { key: 'crouchMode', label: 'Crouch key', type: 'select', options: ['toggle', 'hold'] },
+  { key: 'adsMode', label: 'Aim down sights', type: 'select', options: ['hold', 'toggle'] },
+  { key: 'leanMode', label: 'Lean keys', type: 'select', options: ['hold', 'toggle'] },
+  { key: 'hitmarkerSound', label: 'Hitmarker sound', type: 'bool' },
   { key: 'volume', label: 'Master volume', type: 'range', min: 0, max: 1, step: 0.05 },
 ];
 

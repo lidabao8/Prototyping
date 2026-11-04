@@ -31,6 +31,10 @@ export class Input {
     } catch (e) { /* ignore */ }
   }
   unlock() { try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) { /* ignore */ } }
+  // Generic checks that accept keyboard codes or Mouse0..Mouse4.
+  isDown(code) { if (!code) return false; if (code.startsWith('Mouse')) return this.btn(Number(code.slice(5))); return this.keys.has(code); }
+  isHit(code) { if (!code) return false; if (code.startsWith('Mouse')) return this.btnHit(Number(code.slice(5))); return this.pressed.has(code); }
+  isReleased(code) { if (!code) return false; if (code.startsWith('Mouse')) return this.mouse.released.has(Number(code.slice(5))); return this.released.has(code); }
   down(code) { return this.keys.has(code); }
   hit(code) { return this.pressed.has(code); }
   btn(b) { return (this.mouse.buttons & (1 << b)) !== 0; }

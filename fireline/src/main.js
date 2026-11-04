@@ -5,6 +5,7 @@ import { GameAudio } from './core/audio.js';
 import { Input } from './core/input.js';
 import { Menus } from './ui/menus.js';
 import { Game } from './game/game.js';
+import { Showcase } from './ui/showcase.js';
 
 class App {
   constructor() {
@@ -124,8 +125,10 @@ class App {
         this.showError(e);
       }
     } else {
-      this.renderer.setClearColor(0x0b0e12, 1);
-      this.renderer.clear();
+      if (!this.showcase) { try { this.showcase = new Showcase(this.renderer); } catch (e) { console.error(e); this.showcase = false; } }
+      const loading = this.menus.screens.loading && this.menus.screens.loading.style.display !== 'none';
+      if (this.showcase && !loading) this.showcase.render(dt, window.innerWidth, window.innerHeight);
+      else { this.renderer.setClearColor(0x0b0e12, 1); this.renderer.clear(); }
     }
     this.input.endFrame();
   }
