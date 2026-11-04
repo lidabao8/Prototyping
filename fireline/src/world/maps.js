@@ -262,7 +262,7 @@ const brennhof = {
     { id: 'D', name: 'Church', x: -72, z: 46, r: 14 },
     { id: 'E', name: 'Town Hall', x: 72, z: 48, r: 14 },
   ],
-  rivers: [{ points: [[-140, 4], [-60, 2.5], [0, 4], [60, 5.5], [140, 4]], width: 12, depth: 2.4, bankSlope: 0.9 }],
+  rivers: [{ points: [[-124, 4], [-60, 2.5], [0, 4], [60, 5.5], [124, 4]], width: 12, depth: 2.4, bankSlope: 0.9 }],
   roads: [
     { points: [[0, -112], [0, -66]], width: 7 }, { points: [[0, 66], [0, 112]], width: 7 },
     { points: [[-100, -66], [100, -66]], width: 6 }, { points: [[-100, 66], [100, 66]], width: 6 },

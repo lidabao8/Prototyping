@@ -42,6 +42,7 @@ export class Game {
 
   async init(progress) {
     const cfg = this.config;
+    if (!MAPS[cfg.map]) cfg.map = 'ironworks'; // removed or unknown map ids fall back
     const def = MAPS[cfg.map];
     this.def = def;
     clearRegistry(); resetMaterialCaches();
@@ -202,7 +203,7 @@ export class Game {
       yaw = m.yaw;
     } else {
       const r = opt.kind === 'hq' ? Math.min(20, this.def.hq[team].r * 0.6) : opt.kind === 'flag' ? opt.flag.r * 0.8 : 4;
-      let best = null, bs = -1;
+      let best = null, bs = -Infinity;
       const lim = this.def.playHalf - 6;
       for (let k = 0; k < 16; k++) {
         let [cx, cz, cy] = nav.randomWalkableNear(opt.x, opt.z, r);

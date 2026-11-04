@@ -454,7 +454,7 @@ export class Structures {
         const n = o.n || 3, H = o.h || 3.6;
         for (let i = 0; i < n; i++) {
           const x0 = -n + i * 2, fy = this.terrain.heightAt(...f.tf(x0 + 1, 0)) - y;
-          f.box('concrete', x0, fy - 0.3, -0.2, x0 + 2, fy + H, 0.2, { color: i % 2 ? 0xb4b0a6 : 0xbcb8ae, destructible: false });
+          f.box('concrete', x0, fy - 0.3, -0.35, x0 + 2, fy + H, 0.35, { color: i % 2 ? 0xb4b0a6 : 0xbcb8ae, destructible: false });
           f.box('concrete', x0 + 0.06, fy - 0.3, -0.55, x0 + 1.94, fy + 0.45, 0.55, { color: 0xa8a49a, destructible: false });
         }
         this.footprint(x, z, rot, n, 0.5, 'rgba(150,146,138,0.95)');

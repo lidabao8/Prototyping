@@ -1,6 +1,6 @@
 # FIRELINE
 
-A 16 vs 16 low-poly infantry shooter for the browser with AI bots. You play alongside 31 AI soldiers in eight four-person squads. There are six maps (two large, two built for close quarters, two small), three game modes and destructible buildings. Every visual effect can be turned off in the settings, and every key can be rebound.
+A 16 vs 16 low-poly infantry shooter for the browser with AI bots. You play alongside 31 AI soldiers in eight four-person squads. There are four compact maps (about 210–245 m across), three game modes and destructible buildings. Every visual effect can be turned off in the settings, and every key can be rebound.
 
 This game is separate from the other prototypes in this repository. It lives entirely in `fireline/`, has its own build, and needs no asset files: all models, textures and sounds are generated in code when the game starts.
 
@@ -103,12 +103,18 @@ Bots fill input exactly as the player does: they move, aim and shoot through the
 - **Difficulty:** Recruit, Regular, Veteran (default) and Elite. In headless duel tests against a stationary player at 30m, Elite bots downed the player in about 1 second, Veteran in about 2, Regular in about 3 and Recruit in about 5.
 
 ## Maps
-- **Greenhollow** (960 × 960 m, morning): farmland split by a river with two bridges and a ford. Flags are Farmstead, Radio Hill, Mill Bridge (a village), Lumber Mill and Chapel.
-- **Port Kessar** (720 × 720 m, afternoon): a desert harbor town with a dense street grid. Flags are Ridge Outpost, Container Depot, Old Town, Pump Station and Harbor (with piers on the sea).
-- **Ironworks** (440 × 440 m, overcast, close quarters): a foundry with a furnace hall, a rail yard of boxcars, a smelter courtyard and loading docks. Four flags.
-- **Brennhof** (400 × 400 m, dusk, close quarters): a packed old town split by a canal, with narrow streets, a market square, station, brewery, church and town hall. Five flags.
-- **Outpost Zero** (224 m play area, noon, small): a walled desert base with barracks rows, a comms tower and a motor pool inside a hesco perimeter. Three flags.
-- **Frostpine** (244 m play area, snowfall, small): a snowed-in mountain village with a timber ski lodge, cabins among snowy pines, a frozen pond and a sawmill. Three flags.
+All four maps are compact: the play areas average 224 m across.
+
+- **Ironworks** (216 m play area, overcast): a shut-down foundry with a furnace hall, a rail yard of boxcars, a smelter courtyard, loading docks and a control block in the middle. Four flags.
+- **Brennhof** (212 m play area, dusk): a packed old town split by a canal with three bridges. The station, brewery, church and town hall sit around the canal bridge. Five flags.
+- **Outpost Zero** (224 m play area, noon): a walled desert base with barracks rows, a comms tower and a motor pool inside a hesco perimeter. Three flags.
+- **Frostpine** (244 m play area, snowfall): a snowed-in mountain village with a timber ski lodge, cabins among snowy pines, a frozen pond and a sawmill. Three flags.
+
+**Fair spawns**
+- Each HQ is a compound of bulletproof concrete T-walls. Every opening has a second wall behind it, so no position on the map can see into the spawn area. That was checked from every walkable spot, about 2,300–3,500 per map.
+- Neighbouring flags are screened from each other by buildings and container stacks. At most 9% of spawn-point pairs between any two flags have line of sight.
+- When you or a bot spawns, the game picks the point that is farthest from enemies and hidden from all of them.
+- A flag can't be used as a spawn while enemies are within 30 m of it.
 
 You can switch any map to morning, noon, afternoon, dusk, overcast, snow or night. At night, use the flashlight [L].
 
@@ -159,4 +165,4 @@ Every action can be rebound under **Controls** in the main or pause menu. Defaul
 ## Code layout
 `src/core` (math, settings, audio, input) · `src/world` (terrain, maps, buildings, vegetation, collision) · `src/render` (materials, sky and shadows, water, post-processing, textures) · `src/entities` (soldier, player, models) · `src/ai` (navigation grid, bot brain) · `src/game` (match flow, combat, modes, squads) · `src/ui` (HUD, menus). The build uses three.js r170 and is bundled with esbuild into `dist/fireline.js`.
 
-URL options for testing: `?autostart=1&autodeploy=1&map=kessar&mode=frontline&time=night&preset=low`.
+URL options for testing: `?autostart=1&autodeploy=1&map=brennhof&mode=frontline&time=night&preset=low`.
