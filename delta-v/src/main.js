@@ -76,6 +76,7 @@ class Game {
     this.menuCam = 0;
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('pointerlockchange', () => this.onLockChange());
+    document.addEventListener('pointerlockerror', () => { if (!this.input.forceMouse) { this.input.forceMouse = true; if (this.state === 'playing') this.hud.message('POINTER LOCK UNAVAILABLE: MOUSE AIMS DIRECTLY, ESC PAUSES', '#ffcc4d', 4); } });
     this.setupUI();
     this.resize();
     requestAnimationFrame((t) => this.frame(t));
@@ -174,10 +175,16 @@ class Game {
   }
 
   lock() {
+    // Pointer lock can be refused (embedded frames, some browsers): fall back to raw mouse movement.
+    const fallback = () => {
+      if (this.input.forceMouse) return;
+      this.input.forceMouse = true;
+      if (this.state === 'playing') this.hud.message('POINTER LOCK UNAVAILABLE: MOUSE AIMS DIRECTLY, ESC PAUSES', '#ffcc4d', 4);
+    };
     try {
       const r = this.canvas.requestPointerLock();
-      if (r && r.catch) r.catch(() => {});
-    } catch (e) { /* headless */ }
+      if (r && r.catch) r.catch(fallback);
+    } catch (e) { fallback(); }
   }
 
   onLockChange() {
