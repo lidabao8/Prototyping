@@ -16,11 +16,16 @@ const STEP = 1 / 120;
 const CALLSIGNS = ['VEGA', 'KESTREL', 'NOMAD', 'APEX', 'ORBIT', 'HALO', 'RAZOR', 'TALON', 'DRIFT', 'NOVA', 'SPECTER', 'CINDER', 'ECHO', 'PULSAR', 'QUASAR', 'ZENITH'];
 export const ACTIONS = [
   ['forward', 'Move forward', 'KeyW'], ['back', 'Move back', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
-  ['up', 'Move up', 'Space'], ['down', 'Move down', 'ShiftLeft'], ['pushOff', 'Push off (hold, while holding on)', 'KeyZ'], ['rollLeft', 'Roll left', 'KeyQ'], ['rollRight', 'Roll right', 'KeyE'],
+  ['fire', 'Fire', 'Mouse0'], ['ads', 'Aim down sights (hold)', 'Mouse2'],
+  ['up', 'Move up', 'Space'], ['down', 'Move down', 'ShiftLeft'], ['rollLeft', 'Roll left', 'KeyQ'], ['rollRight', 'Roll right', 'KeyE'],
   ['brake', 'Match velocity (brake)', 'KeyC'], ['killRot', 'Kill rotation', 'KeyX'], ['grab', 'Grab / release', 'KeyF'],
   ['reload', 'Reload', 'KeyR'], ['grenade', 'Grenade', 'KeyG'], ['melee', 'Momentum hammer', 'KeyV'],
   ['weapon1', 'Primary weapon', 'Digit1'], ['weapon2', 'Secondary weapon', 'Digit2'],
+  ['nextWeapon', 'Next weapon', 'WheelDown'], ['prevWeapon', 'Previous weapon', 'WheelUp'],
   ['mode', 'Cycle RCS mode', 'KeyT'], ['lockRef', 'Lock velocity reference', 'KeyL'], ['grid', 'Reference grid', 'KeyH'], ['board', 'Scoreboard', 'Tab'],
+  // newer actions start unbound: assign them under Controls & keybinds
+  ['pushOff', 'Push off (hold while holding on)', ''], ['adsToggle', 'Aim down sights (toggle)', ''],
+  ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false };
@@ -38,39 +43,59 @@ export function keyName(code) {
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
   if (code.startsWith('Numpad')) return 'Num' + code.slice(6);
+  const mouse = { Mouse0: 'LMB', Mouse1: 'MMB', Mouse2: 'RMB', Mouse3: 'Mouse 4', Mouse4: 'Mouse 5', WheelUp: 'Wheel ↑', WheelDown: 'Wheel ↓' };
+  if (mouse[code]) return mouse[code];
   const map = { Space: 'Space', ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift', ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'L-Alt', AltRight: 'R-Alt', Tab: 'Tab', CapsLock: 'Caps', Backquote: '`', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: 'Enter', Backspace: 'Bksp' };
   return map[code] || code;
 }
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion();
 
+/**
+ * Raw input. Keyboard keys use KeyboardEvent.code; mouse buttons are 'Mouse0'..'Mouse4' and the wheel is
+ * 'WheelUp' / 'WheelDown' (one-frame presses), so every action can be bound to any of them.
+ */
 class Input {
   constructor(el) {
     this.keys = new Set();
     this.pressed = new Set();
-    this.mouse = { dx: 0, dy: 0, left: false, right: false, leftPressed: false, wheel: 0 };
+    this.mouse = { dx: 0, dy: 0 };
     this.el = el;
+    const takeCapture = (code, e) => {
+      if (!this.capture) return false;
+      e.preventDefault(); e.stopPropagation();
+      const cb = this.capture; this.capture = null; cb(code);
+      return true;
+    };
     window.addEventListener('keydown', (e) => {
-      if (this.capture) { e.preventDefault(); const cb = this.capture; this.capture = null; cb(e.code); return; }
+      if (takeCapture(e.code, e)) return;
       if (e.code === 'Tab' || e.code === 'Space' || (e.code.startsWith('Arrow') && !(e.target && e.target.tagName === 'SELECT'))) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
     });
     window.addEventListener('keyup', (e) => { this.keys.delete(e.code); });
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouse.left = this.mouse.right = false; });
+    window.addEventListener('blur', () => { this.keys.clear(); });
     window.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement === el || this.forceMouse) { this.mouse.dx += e.movementX || 0; this.mouse.dy += e.movementY || 0; }
     });
+    window.addEventListener('mousedown', (e) => { takeCapture('Mouse' + e.button, e); }, true);
     el.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { this.mouse.left = true; this.mouse.leftPressed = true; }
-      if (e.button === 2) this.mouse.right = true;
+      const c = 'Mouse' + e.button;
+      if (!this.keys.has(c)) this.pressed.add(c);
+      this.keys.add(c);
+      if (e.button === 1) e.preventDefault();
     });
-    window.addEventListener('mouseup', (e) => { if (e.button === 0) this.mouse.left = false; if (e.button === 2) this.mouse.right = false; });
+    window.addEventListener('mouseup', (e) => { this.keys.delete('Mouse' + e.button); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    window.addEventListener('wheel', (e) => { this.mouse.wheel += Math.sign(e.deltaY); }, { passive: true });
+    window.addEventListener('wheel', (e) => {
+      if (!e.deltaY) return;
+      const c = e.deltaY > 0 ? 'WheelDown' : 'WheelUp';
+      if (this.capture) { const cb = this.capture; this.capture = null; cb(c); return; }
+      this.pressed.add(c);
+    }, { passive: true });
   }
-  down(c) { return this.keys.has(c); }
-  hit(c) { return this.pressed.has(c); }
-  endFrame() { this.pressed.clear(); this.mouse.dx = this.mouse.dy = 0; this.mouse.leftPressed = false; this.mouse.wheel = 0; }
+  down(c) { return !!c && this.keys.has(c); }
+  hit(c) { return !!c && this.pressed.has(c); }
+  endFrame() { this.pressed.clear(); this.mouse.dx = this.mouse.dy = 0; }
 }
 
 class Game {
@@ -118,7 +143,6 @@ class Game {
     try { saved = JSON.parse(localStorage.getItem('deltav.settings') || '{}') || {}; } catch (e) { saved = {}; }
     const st = { ...DEFAULTS, ...saved };
     st.binds = { ...DEFAULT_BINDS, ...(saved.binds || {}) };
-    if (!(saved.binds && saved.binds.pushOff) && Object.entries(st.binds).some(([k, v]) => k !== 'pushOff' && v === st.binds.pushOff)) st.binds.pushOff = '';
     st.rules = { ...DEFAULT_RULES, ...(saved.rules || {}) };
     if (!MAPS[st.map]) st.map = 'hangar';
     st.gfx = { ...DEFAULTS.gfx, ...(saved.gfx || {}) };
@@ -327,12 +351,14 @@ class Game {
       const row = document.createElement('div'); row.className = 'bind';
       const l = document.createElement('span'); l.textContent = label;
       const b = document.createElement('button'); b.className = 'key'; b.type = 'button'; b.id = 'bind_' + id;
-      b.textContent = keyName(st.binds[id]);
+      b.textContent = st.binds[id] ? keyName(st.binds[id]) : 'unbound';
+      if (!st.binds[id]) b.classList.add('unbound');
       b.addEventListener('click', () => {
-        b.textContent = 'press a key…'; b.classList.add('wait');
+        b.textContent = 'press key / button…'; b.classList.add('wait');
         this.input.capture = (code) => {
           b.classList.remove('wait');
-          if (code !== 'Escape') {
+          if (code === 'Backspace' || code === 'Delete') { st.binds[id] = ''; this.saveSettings(); }
+          else if (code !== 'Escape') {
             // a key can only do one thing: swap with whatever used it before
             for (const k of Object.keys(st.binds)) if (st.binds[k] === code && k !== id) st.binds[k] = st.binds[id];
             st.binds[id] = code;
@@ -345,7 +371,7 @@ class Game {
       row.append(l, b); box.append(row);
     }
     const fixed = document.createElement('div'); fixed.className = 'bindnote';
-    fixed.textContent = 'Fixed: mouse = turn your body, left click = fire, right click = zoom, wheel = cycle weapons, Esc = pause.';
+    fixed.textContent = 'Click a binding, then press a key, mouse button or scroll the wheel. Backspace clears it, Esc cancels. Fixed: mouse movement turns your body, Esc pauses.';
     box.append(fixed);
     const reset = document.getElementById('btnResetBinds');
     if (reset && !reset._wired) { reset._wired = true; reset.addEventListener('click', () => { st.binds = { ...DEFAULT_BINDS }; this.saveSettings(); this.buildBindUI(); }); }
@@ -416,6 +442,7 @@ class Game {
     const names = CALLSIGNS.slice().sort(() => Math.random() - 0.5);
     this.player = new Soldier(this, 0, 'YOU', true);
     this.player.mode = st.mode;
+    this.adsToggled = false;
     this.soldiers.push(this.player);
     let ni = 0;
     for (let team = 0; team < 2; team++) {
@@ -622,7 +649,9 @@ class Game {
     const p = this.player, inp = this.input, c = p.ctrl;
     if (inp.hit('Escape')) { this.pause(); return; }
     if (!p.alive) { c.move.set(0, 0, 0); return; }
-    p.ads = inp.mouse.right && p.throwT <= 0;
+    if (this.pressedAct('adsToggle')) this.adsToggled = !this.adsToggled;
+    if (this.bound('ads')) this.adsToggled = false;
+    p.ads = (this.bound('ads') || this.adsToggled) && p.throwT <= 0;
     const zoom = (this.vmGuns[p.weapon.def.id].userData.zoom || 1.5);
     const sens = 0.0022 * this.settings.sens / (1 + (zoom - 1) * p.adsAmt);
     // mouse turns the body directly
@@ -630,8 +659,8 @@ class Game {
     const k = (a) => (this.bound(a) ? 1 : 0);
     c.move.set(k('right') - k('left'), k('up') - k('down'), k('back') - k('forward'));
     c.roll = k('rollLeft') - k('rollRight');
-    c.killRot = this.bound('killRot');
-    c.brake = this.bound('brake');
+    c.killRot = this.bound('killRot') || this.bound('fullStop');
+    c.brake = this.bound('brake') || this.bound('fullStop');
     if (this.pressedAct('mode')) {
       p.mode = (p.mode + 1) % MODES.length; this.settings.mode = p.mode; this.saveSettings();
       this.hud.message(`RCS MODE: ${MODES[p.mode]}`, '#ffcc4d', 2.5);
@@ -654,12 +683,14 @@ class Game {
     // weapons
     const nW = p.weapons.length;
     for (let i = 0; i < nW; i++) if (this.pressedAct('weapon' + (i + 1))) p.switchTo(i);
-    if (inp.mouse.wheel) p.switchTo((p.cur + (inp.mouse.wheel > 0 ? 1 : nW - 1)) % nW);
+    if (this.pressedAct('nextWeapon')) p.switchTo((p.cur + 1) % nW);
+    if (this.pressedAct('prevWeapon')) p.switchTo((p.cur + nW - 1) % nW);
+    if (this.pressedAct('lastWeapon') && p.lastCur != null) p.switchTo(p.lastCur);
     if (this.pressedAct('reload')) { if (p.startReload()) this.audio.play('reload'); }
     if (this.pressedAct('grenade')) this.combat.throwGrenade(p);
     if (this.pressedAct('melee')) this.combat.melee(p);
     const def = p.weapon.def;
-    if (def.auto ? inp.mouse.left : inp.mouse.leftPressed) this.combat.fire(p);
+    if (def.auto ? this.bound('fire') : this.pressedAct('fire')) this.combat.fire(p);
     if (this.pressedAct('board')) this.ui.board.style.display = 'flex';
     if (!this.bound('board')) this.ui.board.style.display = 'none';
     else this.ui.board.innerHTML = this.boardHTML();

@@ -99,23 +99,29 @@ The HUD shows:
 
 ## Controls
 
-Every key can be rebound in the menu under **Controls & keybinds**. Rebinding a key that's already in use swaps the two actions. Defaults:
+Every action can be rebound in the menu under **Controls & keybinds**. Click a binding, then press a key, click a mouse button (left, middle, right, or side buttons) or scroll the wheel. Backspace clears a binding and Esc cancels. Binding a key that's already in use swaps the two actions. Only mouse movement (turning) and Esc (pause) are fixed.
 
-| Input | Action |
+| Default | Action |
 | --- | --- |
 | Mouse | Turn your body |
+| LMB / RMB | Fire / aim down sights (hold) |
 | W/S, A/D | Translate forward/back, left/right (body frame) |
-| Space / Left Shift | Translate up / down (crawls along a held surface, like the other move keys) |
-| Z | Hold to charge a push-off while holding on; release to launch towards your aim (up to 7 m/s) |
+| Space / Left Shift | Translate up / down (also crawl along a held surface) |
 | Q / E | Roll |
 | C | Match velocity (brake) |
 | X | Kill rotation |
-| F | Grab or release the nearest surface or pod. While holding a surface, the move keys crawl you along it hand-over-hand (no gas, wraps around edges, lets go past the end). |
-| LMB / RMB | Fire / zoom (fixed) |
-| 1 2, wheel | Primary / secondary weapon |
+| F | Grab or release the nearest surface or pod |
+| 1 / 2, wheel | Primary / secondary, next / previous weapon |
 | R / G / V | Reload / grenade / hammer |
 | T / L / H | Assist mode / lock velocity reference / reference grid |
-| Tab / Esc | Scoreboard / pause (Esc is fixed) |
+| Tab | Scoreboard |
+
+These newer actions start **unbound**:
+
+* **Push off:** hold while holding on, release to launch towards your aim at up to 7 m/s.
+* **Aim down sights (toggle).**
+* **Last used weapon.**
+* **Full stop:** brake and kill rotation together.
 
 ## Bots
 

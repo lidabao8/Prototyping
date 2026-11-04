@@ -559,6 +559,7 @@ export class Soldier {
   switchTo(i) {
     if (i === this.cur || i < 0 || i >= this.weapons.length) return;
     this.weapon.reloadT = 0;
+    this.lastCur = this.cur;
     this.cur = i; this.switchT = 0.45;
   }
 
