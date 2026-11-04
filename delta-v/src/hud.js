@@ -19,7 +19,35 @@ export class HUD {
     this.collWarnT = 0;
     this.impactT = 0; this.impactSev = 0; this.cracks = [];
     this.font = "'Rajdhani','Bahnschrift','Segoe UI',Arial,sans-serif";
+    this.disp = "'Orbitron','Rajdhani','Bahnschrift',sans-serif";
     this.resize();
+  }
+
+  setQuality(g) { this.glow = (g.bloom || 0) > 0; }
+
+  /** Glass plate with clipped top-left / bottom-right corners (the HUD's basic shape). */
+  plate(x, y, w, h, c = 8, fill = 'rgba(6,10,16,0.62)', stroke = 'rgba(159,232,255,0.18)') {
+    const g = this.g;
+    g.beginPath();
+    g.moveTo(x + c, y); g.lineTo(x + w, y); g.lineTo(x + w, y + h - c); g.lineTo(x + w - c, y + h); g.lineTo(x, y + h); g.lineTo(x, y + c); g.closePath();
+    if (fill) { g.fillStyle = fill; g.fill(); }
+    if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1; g.stroke(); }
+  }
+
+  spaced(t, x, y, size, color, align = 'left', weight = 700, spacing = 2, font = null) {
+    const g = this.g;
+    g.font = `${weight} ${size}px ${font || this.font}`;
+    if ('letterSpacing' in g) g.letterSpacing = spacing + 'px';
+    g.textAlign = align; g.fillStyle = color;
+    g.fillText(t, x, y);
+    if ('letterSpacing' in g) g.letterSpacing = '0px';
+  }
+
+  num(t, x, y, size, color, align = 'left') {
+    const g = this.g;
+    if (this.glow) { g.shadowColor = color; g.shadowBlur = 8; }
+    this.spaced(t, x, y, size, color, align, 800, 1, this.disp);
+    g.shadowBlur = 0;
   }
 
   resize() {
@@ -145,6 +173,7 @@ export class HUD {
     if (!p) return;
     if (p.alive) {
       if (game.showGrid || p.angVel.length() > 1.4) { /* grid drawn in 3D */ }
+      if (game.scoped) this.drawScope(cx, cy);
       this.drawMarkers();
       this.drawVelocityMarkers();
       this.drawCrosshair(cx, cy, dt);
@@ -167,44 +196,55 @@ export class HUD {
 
   drawScore() {
     const g = this.g, game = this.game, cx = this.W / 2;
-    const s = game.teamScore;
-    g.fillStyle = 'rgba(8,12,16,0.55)';
-    g.fillRect(cx - 150, 10, 300, 40);
-    g.fillStyle = BLUE; g.fillRect(cx - 150, 10, 4, 40);
-    g.fillStyle = ORANGE; g.fillRect(cx + 146, 10, 4, 40);
-    this.text(String(s[0]), cx - 60, 31, 28, BLUE, 'center', 700);
-    this.text(String(s[1]), cx + 60, 31, 28, ORANGE, 'center', 700);
+    const sc = game.teamScore, lim = game.scoreLimit;
+    const y = 14, h = 40;
+    // team plates
+    for (const [team, dir] of [[0, -1], [1, 1]]) {
+      const col = team === 0 ? BLUE : ORANGE;
+      const x = dir < 0 ? cx - 70 - 120 : cx + 70;
+      this.plate(x, y, 120, h, 8, 'rgba(6,10,16,0.6)', null);
+      g.fillStyle = col; g.globalAlpha = 0.85;
+      g.fillRect(dir < 0 ? x : x + 116, y, 4, h);
+      g.globalAlpha = 1;
+      this.num(String(sc[team]), dir < 0 ? x + 104 : x + 16, y + h / 2 + 1, 24, col, dir < 0 ? 'right' : 'left');
+      this.spaced(TEAM_NAMES[team], dir < 0 ? x + 14 : x + 106, y + h / 2 + 1, 10, 'rgba(233,238,242,0.7)', dir < 0 ? 'left' : 'right', 700, 3);
+      // progress to the score limit
+      const f = clamp(sc[team] / lim, 0, 1);
+      g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(x, y + h + 4, 120, 3);
+      g.fillStyle = col; g.fillRect(dir < 0 ? x + 120 * (1 - f) : x, y + h + 4, 120 * f, 3);
+    }
+    // timer capsule
+    this.plate(cx - 64, y - 2, 128, h + 4, 10, 'rgba(10,16,24,0.78)', 'rgba(159,232,255,0.28)');
     const tl = Math.max(0, game.timeLimit - game.matchTime);
     const mm = Math.floor(tl / 60), ss = Math.floor(tl % 60);
-    this.text(`${mm}:${ss.toString().padStart(2, '0')}`, cx, 25, 18, '#e9eef2', 'center', 700);
-    this.text(`FIRST TO ${game.scoreLimit}`, cx, 41, 10, '#93a0ab', 'center');
-    // score bars
-    const f0 = s[0] / game.scoreLimit, f1 = s[1] / game.scoreLimit;
-    g.fillStyle = BLUE; g.fillRect(cx - 146, 50, 140 * f0, 3);
-    g.fillStyle = ORANGE; g.fillRect(cx + 6 + 140 * (1 - f1), 50, 140 * f1, 3);
+    this.num(`${mm}:${ss.toString().padStart(2, '0')}`, cx, y + 16, 18, tl < 60 ? WARN : '#e9eef2', 'center');
+    this.spaced(`FIRST TO ${lim}`, cx, y + 33, 9, '#8996a1', 'center', 700, 3);
   }
 
   drawFeed(dt) {
     const g = this.g;
-    let y = 22;
+    let y = 74;
     for (const f of this.feed) {
       f.t -= dt;
-      const a = clamp(f.t, 0, 1);
-      g.globalAlpha = a;
-      const kc = f.killer ? css(TEAM_COLORS[f.killer.team]) : '#cccccc';
+      g.globalAlpha = clamp(f.t, 0, 1);
+      const kc = f.killer ? css(TEAM_COLORS[f.killer.team]) : '#c9d3dc';
       const vc = css(TEAM_COLORS[f.victim.team]);
-      const x = this.W - 16;
-      const cause = `[${f.cause.toUpperCase()}${f.head ? ' ⦿' : ''}]`;
-      g.font = `600 14px ${this.font}`;
-      const vw = g.measureText(f.victim.name).width;
-      const cw = g.measureText(cause).width;
-      g.fillStyle = 'rgba(8,12,16,0.5)';
-      const kw = f.killer ? g.measureText(f.killer.name).width : 0;
-      g.fillRect(x - vw - cw - kw - 24, y - 10, vw + cw + kw + 30, 20);
-      this.text(f.victim.name, x, y, 14, vc, 'right');
-      this.text(cause, x - vw - 8, y, 12, '#c9d3dc', 'right');
-      if (f.killer) this.text(f.killer.name, x - vw - cw - 16, y, 14, kc, 'right');
-      y += 22;
+      const tag = f.cause.toUpperCase();
+      g.font = `700 14px ${this.font}`;
+      const vw = g.measureText(f.victim.name).width, kw = f.killer ? g.measureText(f.killer.name).width : 0;
+      g.font = `700 10px ${this.font}`;
+      const tw = g.measureText(tag).width + 14 + (f.head ? 14 : 0);
+      const w = vw + kw + tw + 34, x = this.W - 18 - w;
+      const mine = (f.killer && f.killer.isPlayer) || f.victim.isPlayer;
+      this.plate(x, y - 11, w, 22, 6, mine ? 'rgba(255,204,77,0.14)' : 'rgba(6,10,16,0.6)', mine ? 'rgba(255,204,77,0.45)' : null);
+      let cx = x + 10;
+      if (f.killer) { this.spaced(f.killer.name, cx, y + 1, 14, kc, 'left', 700, 0.5); cx += kw + 8; }
+      g.fillStyle = 'rgba(233,238,242,0.12)'; g.fillRect(cx, y - 7, tw, 14);
+      this.spaced(tag, cx + 7, y + 1, 10, '#dfe6ec', 'left', 700, 1.5);
+      if (f.head) { g.strokeStyle = WARN; g.lineWidth = 1.5; g.beginPath(); g.arc(cx + tw - 9, y, 4, 0, Math.PI * 2); g.stroke(); g.fillStyle = WARN; g.fillRect(cx + tw - 10, y - 1, 2, 2); }
+      cx += tw + 8;
+      this.spaced(f.victim.name, cx, y + 1, 14, vc, 'left', 700, 0.5);
+      y += 26;
     }
     this.feed = this.feed.filter((f) => f.t > 0);
     g.globalAlpha = 1;
@@ -230,14 +270,13 @@ export class HUD {
       if (!game.world.los(eye, s.pos)) continue;
       const c = this.project(s.pos, {});
       // lead indicator: where to aim so a round hits if the target does not accelerate.
-      // Drawn small and fades out when it nearly overlaps the target itself.
+      // Drawn small; always shown, even when it nearly overlaps the target.
       const rel = _v.subVectors(s.pos, eye), vRel = _v2.subVectors(s.vel, p.vel);
       const t = def.kind === 'rocket' ? interceptTimeRocket(rel, vRel, def.speed, def.accel, def.burn) : interceptTime(rel, vRel, def.speed);
       if (t > 0 && vRel.length() > 0.15) {
         const lp = this.project(_v3.copy(s.pos).addScaledVector(vRel, t), {});
-        const sep = Math.hypot(lp.x - c.x, lp.y - c.y);
-        const a = clamp((sep - 6) / 45, 0, 1) * 0.7;
-        if (lp.on && a > 0.04) {
+        const a = 0.75;
+        if (lp.on) {
           g.strokeStyle = `rgba(255,110,90,${a})`; g.lineWidth = 1.2;
           const r = 4;
           g.beginPath(); g.moveTo(lp.x, lp.y - r); g.lineTo(lp.x + r, lp.y); g.lineTo(lp.x, lp.y + r); g.lineTo(lp.x - r, lp.y); g.closePath(); g.stroke();
@@ -245,6 +284,19 @@ export class HUD {
         }
       }
       const sz = clamp(500 / dist, 8, 60);
+      // guided weapon: show which target the round would track
+      if (def.homing) {
+        const ad = p.aimDir(_v2);
+        const toE = _v3.subVectors(s.pos, eye).normalize();
+        if (Math.acos(clamp(ad.dot(toE), -1, 1)) < def.homing.cone) {
+          const r = sz * 0.9 + 6;
+          g.strokeStyle = WARN; g.lineWidth = 1.5;
+          for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+            g.beginPath(); g.moveTo(c.x + sx * r, c.y + sy * (r - 6)); g.lineTo(c.x + sx * r, c.y + sy * r); g.lineTo(c.x + sx * (r - 6), c.y + sy * r); g.stroke();
+          }
+          this.spaced('TRACK', c.x, c.y + r + 12, 9, WARN, 'center', 700, 2);
+        }
+      }
       if (dist < 120) this.text(`${dist.toFixed(0)}m`, c.x + sz * 0.6 + 4, c.y - sz * 0.6, 10, 'rgba(255,120,100,0.75)');
     }
   }
@@ -273,6 +325,35 @@ export class HUD {
       g.beginPath(); g.moveTo(retro.x, retro.y - 8); g.lineTo(retro.x, retro.y - 15); g.stroke();
     }
     g.lineWidth = 1.5;
+  }
+
+  /** Full-screen optic for scoped weapons: masked window, thin frame, plain crosshair. */
+  drawScope(cx, cy) {
+    const g = this.g, p = this.game.player, W = this.W, H = this.H;
+    const S = Math.min(W, H) * 0.86, r = S * 0.12;
+    const x0 = cx - S / 2, y0 = cy - S / 2;
+    const round = (x, y, w, h, rr) => { g.moveTo(x + rr, y); g.arcTo(x + w, y, x + w, y + h, rr); g.arcTo(x + w, y + h, x, y + h, rr); g.arcTo(x, y + h, x, y, rr); g.arcTo(x, y, x + w, y, rr); g.closePath(); };
+    g.beginPath(); g.rect(0, 0, W, H); round(x0, y0, S, S, r);
+    g.fillStyle = 'rgba(2,4,8,0.94)'; g.fill('evenodd');
+    const vg = g.createRadialGradient(cx, cy, S * 0.3, cx, cy, S * 0.72);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,10,20,0.55)');
+    g.save(); g.beginPath(); round(x0, y0, S, S, r); g.clip(); g.fillStyle = vg; g.fillRect(x0, y0, S, S); g.restore();
+    g.strokeStyle = 'rgba(159,232,255,0.55)'; g.lineWidth = 2; g.beginPath(); round(x0, y0, S, S, r); g.stroke();
+    g.strokeStyle = 'rgba(159,232,255,0.25)'; g.lineWidth = 1; g.beginPath(); round(x0 + 10, y0 + 10, S - 20, S - 20, r * 0.85); g.stroke();
+    // reticle: thin lines with an open centre and a dot
+    const col = 'rgba(255,70,50,0.95)', gap = 14, len = S * 0.42;
+    g.strokeStyle = col; g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(cx - len, cy); g.lineTo(cx - gap, cy); g.moveTo(cx + gap, cy); g.lineTo(cx + len, cy);
+    g.moveTo(cx, cy - len); g.lineTo(cx, cy - gap); g.moveTo(cx, cy + gap); g.lineTo(cx, cy + len);
+    g.stroke();
+    g.lineWidth = 3; g.beginPath(); g.moveTo(cx - len, cy); g.lineTo(cx - len * 0.7, cy); g.moveTo(cx + len * 0.7, cy); g.lineTo(cx + len, cy); g.moveTo(cx, cy + len * 0.7); g.lineTo(cx, cy + len); g.stroke();
+    g.fillStyle = col; g.beginPath(); g.arc(cx, cy, 1.8, 0, Math.PI * 2); g.fill();
+    // readouts along the bottom edge of the optic
+    const info = this.aimInfo, ud = this.game.vmGuns[p.weapon.def.id].userData;
+    this.spaced(`${(ud.zoom || 1).toFixed(1)}×`, x0 + 28, y0 + S - 26, 13, '#9fe8ff', 'left', 700, 2, this.disp);
+    if (info && info.dist < 399) this.spaced(`${info.dist.toFixed(0)} m`, x0 + S - 28, y0 + S - 26, 13, '#9fe8ff', 'right', 700, 2, this.disp);
+    if (p.weapon.def.homing) this.spaced('GUIDED HE', cx, y0 + S - 26, 11, WARN, 'center', 700, 3);
   }
 
   drawBounds(cx, cy) {
@@ -403,35 +484,59 @@ export class HUD {
   }
 
   drawStatus() {
-    const g = this.g, p = this.game.player, H = this.H;
-    const x = 20, y = H - 150;
-    g.fillStyle = 'rgba(8,12,16,0.55)'; g.fillRect(x - 8, y - 18, 250, 150);
-    const dv = p.dv, frac = p.gas / GAS_MAX;
-    this.text('Δv', x, y, 13, '#93a0ab');
-    this.text(this.game.rules.infiniteGas ? '∞' : `${dv.toFixed(1)} m/s`, x + 26, y, 22, frac < 0.2 ? DANGER : '#e9eef2', 'left', 700);
-    this.text(`N₂ ${p.gas.toFixed(2)} kg`, x + 150, y, 12, '#93a0ab');
-    this.bar(x, y + 14, 230, 5, frac, frac < 0.2 ? DANGER : HUD_C);
-    this.text('HP', x, y + 36, 13, '#93a0ab');
-    this.text(`${Math.ceil(p.health)}`, x + 26, y + 36, 20, p.health < 35 ? DANGER : '#e9eef2', 'left', 700);
-    this.bar(x + 70, y + 32, 160, 6, p.health / 100, p.health < 35 ? DANGER : OK);
-    this.text('O₂', x, y + 58, 13, '#93a0ab');
-    this.text(`${Math.ceil(p.o2)}%`, x + 26, y + 58, 16, p.o2 < 30 ? DANGER : '#e9eef2', 'left', 700);
-    this.bar(x + 70, y + 55, 160, 5, p.o2 / 100, p.leaks.length ? WARN : '#8fb8ff');
-    if (p.leaks.length) this.text(`SUIT BREACH ×${p.leaks.length} – VENTING`, x + 70, y + 68, 10, (this.game.time * 3) % 1 < 0.6 ? DANGER : WARN);
-    this.text(`RCS: ${MODES[p.mode]}`, x, y + 88, 14, WARN, 'left', 700);
-    this.text(`[${this.game.keyLabel('mode')}] cycle`, x + 140, y + 88, 10, '#93a0ab');
-    const st = p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
-    this.text(st, x, y + 108, 12, p.grab ? OK : HUD_C);
+    const g = this.g, p = this.game.player, H = this.H, game = this.game;
+    const x = 22, y = H - 128, w = 330, h = 106;
+    this.plate(x, y, w, h, 12);
+    // delta-v ring gauge
+    const gx = x + 52, gy = y + 54, r = 34, frac = p.gas / GAS_MAX;
+    g.lineWidth = 6; g.strokeStyle = 'rgba(255,255,255,0.08)';
+    g.beginPath(); g.arc(gx, gy, r, Math.PI * 0.75, Math.PI * 2.25); g.stroke();
+    const col = game.rules.infiniteGas ? HUD_C : frac < 0.2 ? DANGER : frac < 0.4 ? WARN : HUD_C;
+    g.strokeStyle = col;
+    if (this.glow) { g.shadowColor = col; g.shadowBlur = 10; }
+    g.beginPath(); g.arc(gx, gy, r, Math.PI * 0.75, Math.PI * (0.75 + 1.5 * (game.rules.infiniteGas ? 1 : frac))); g.stroke();
+    g.shadowBlur = 0;
+    this.num(game.rules.infiniteGas ? '∞' : p.dv.toFixed(0), gx, gy - 2, 20, '#e9eef2', 'center');
+    this.spaced('Δv m/s', gx, gy + 16, 9, '#8996a1', 'center', 700, 1.5);
+    this.spaced(`N₂ ${p.gas.toFixed(1)}`, gx, gy + 36, 9, '#8996a1', 'center', 700, 1);
+    // health: big number + 10 segments
+    const hx = x + 104;
+    const hc = p.health < 35 ? DANGER : p.health < 60 ? WARN : '#e9eef2';
+    this.num(String(Math.ceil(p.health)), hx, y + 30, 28, hc);
+    this.spaced('HEALTH', hx + 62, y + 24, 9, '#8996a1', 'left', 700, 3);
+    for (let i = 0; i < 10; i++) {
+      const on = p.health > i * 10 + 0.5;
+      g.fillStyle = on ? (p.health < 35 ? DANGER : OK) : 'rgba(255,255,255,0.08)';
+      g.fillRect(hx + i * 15, y + 48, 12, 6);
+    }
+    // oxygen
+    this.spaced('O₂', hx, y + 72, 10, '#8996a1', 'left', 700, 2);
+    this.bar(hx + 24, y + 68, 100, 4, p.o2 / 100, p.leaks.length ? WARN : '#8fb8ff');
+    this.spaced(`${Math.ceil(p.o2)}%`, hx + 150, y + 72, 11, p.o2 < 30 ? DANGER : '#c9d3dc', 'right', 700, 1);
+    if (p.leaks.length) this.spaced(`BREACH ×${p.leaks.length}`, hx, y + 90, 10, (game.time * 3) % 1 < 0.6 ? DANGER : WARN, 'left', 700, 2);
+    else {
+      const st = p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
+      this.spaced(st, hx, y + 90, 10, p.grab ? OK : 'rgba(159,232,255,0.75)', 'left', 700, 2);
+    }
+    // RCS mode chip above the cluster
+    const mode = `RCS · ${MODES[p.mode]}`;
+    g.font = `700 11px ${this.font}`;
+    const mw = g.measureText(mode).width + 40;
+    this.plate(x, y - 28, mw, 22, 6, 'rgba(255,204,77,0.12)', 'rgba(255,204,77,0.4)');
+    this.spaced(mode, x + 10, y - 16, 11, WARN, 'left', 700, 2);
+    this.spaced(this.game.keyLabel('mode'), x + mw - 8, y - 16, 9, 'rgba(255,204,77,0.7)', 'right', 700, 1);
     const thr = p.throttle.reduce((a, b) => a + b, 0);
-    if (thr > 0.05) this.text(`RCS FIRING ${thr.toFixed(1)}`, x + 120, y + 108, 11, '#cfe8ff');
+    if (thr > 0.05) {
+      this.plate(x + mw + 6, y - 28, 92, 22, 6, 'rgba(159,232,255,0.1)', 'rgba(159,232,255,0.3)');
+      this.spaced(`RCS ${thr.toFixed(1)}`, x + mw + 16, y - 16, 11, '#cfe8ff', 'left', 700, 2);
+    }
   }
 
   drawSuit() {
     // suit integrity diagram: torso + 4 thruster quads, nozzle activity, leaks
     const g = this.g, p = this.game.player;
-    const ox = 300, oy = this.H - 80, s = 55;
-    g.fillStyle = 'rgba(8,12,16,0.55)'; g.fillRect(ox - 62, oy - 70, 124, 140);
-    this.text('SUIT', ox, oy - 58, 10, '#93a0ab', 'center');
+    const ox = 316, oy = this.H - 70, s = 44;
+    this.spaced('SUIT', ox, oy - 48, 9, '#8996a1', 'center', 700, 3);
     g.strokeStyle = 'rgba(159,232,255,0.5)'; g.lineWidth = 1.5;
     g.strokeRect(ox - 14, oy - 30, 28, 40);
     g.beginPath(); g.arc(ox, oy - 40, 9, 0, Math.PI * 2); g.stroke();
@@ -456,24 +561,52 @@ export class HUD {
 
   drawWeapon() {
     const g = this.g, p = this.game.player, W = this.W, H = this.H;
-    const w = p.weapon;
-    const x = W - 20, y = H - 110;
-    g.fillStyle = 'rgba(8,12,16,0.55)'; g.fillRect(x - 240, y - 50, 248, 148);
-    this.text(w.def.name, x, y, 14, '#e9eef2', 'right', 700);
-    if (w.def.kind === 'beam') {
-      this.text(w.overheat ? 'OVERHEAT' : 'HEAT', x - 170, y + 30, 12, w.overheat ? DANGER : '#93a0ab');
-      this.bar(x - 170, y + 40, 165, 6, w.heat, w.overheat ? DANGER : w.heat > 0.7 ? WARN : HUD_C);
+    const w = p.weapon, def = w.def;
+    const pw = 300, ph = 106, x = W - 22 - pw, y = H - 128;
+    this.plate(x, y, pw, ph, 12);
+    // weapon slots above
+    p.weapons.forEach((ws, i) => {
+      const on = i === p.cur;
+      const sx = x + pw - (p.weapons.length - i) * 112;
+      this.plate(sx, y - 28, 106, 22, 6, on ? 'rgba(159,232,255,0.16)' : 'rgba(6,10,16,0.5)', on ? 'rgba(159,232,255,0.5)' : null);
+      this.spaced(this.game.keyLabel('weapon' + (i + 1)), sx + 10, y - 16, 10, on ? WARN : '#8996a1', 'left', 700, 1);
+      this.spaced(ws.def.short, sx + 96, y - 16, 12, on ? '#e9eef2' : '#8996a1', 'right', 700, 2);
+    });
+    this.spaced(def.name, x + pw - 16, y + 20, 12, '#c9d3dc', 'right', 700, 3);
+    if (def.kind === 'beam') {
+      this.spaced(w.overheat ? 'OVERHEAT' : 'HEAT', x + 18, y + 48, 11, w.overheat ? DANGER : '#8996a1', 'left', 700, 3);
+      const segs = 20;
+      for (let i = 0; i < segs; i++) {
+        const on = w.heat > i / segs;
+        g.fillStyle = on ? (w.overheat ? DANGER : i / segs > 0.7 ? WARN : HUD_C) : 'rgba(255,255,255,0.08)';
+        g.fillRect(x + 18 + i * 13, y + 58, 10, 10);
+      }
     } else {
-      this.text(`${w.mag}`, x - 60, y + 34, 38, w.mag === 0 ? DANGER : '#e9eef2', 'right', 700);
-      this.text(`/ ${w.reserve}`, x, y + 38, 18, '#93a0ab', 'right');
+      this.num(String(w.mag), x + pw - 92, y + 56, 34, w.mag === 0 ? DANGER : w.mag <= Math.ceil(def.mag * 0.25) ? WARN : '#e9eef2', 'right');
+      this.spaced(`/ ${w.reserve}`, x + pw - 16, y + 60, 16, '#8996a1', 'right', 700, 1);
+      // round pips
+      const n = def.mag, maxW = pw - 175;
+      const pwid = Math.max(2, Math.min(8, Math.floor(maxW / n) - 2));
+      for (let i = 0; i < n; i++) {
+        g.fillStyle = i < w.mag ? 'rgba(233,238,242,0.85)' : 'rgba(255,255,255,0.1)';
+        g.fillRect(x + 18 + i * (pwid + 2), y + 48, pwid, 14);
+      }
     }
-    if (w.reloadT > 0) {
-      this.text('RELOADING', x - 120, y + 64, 12, WARN, 'center');
-      this.bar(x - 200, y + 74, 160, 3, 1 - w.reloadT / w.def.reload, WARN);
+    if (w.reloadT > 0 && def.reload > 0) {
+      const f = def.perShell ? 1 - w.reloadT / def.reload : 1 - w.reloadT / def.reload;
+      this.spaced('RELOADING', x + 18, y + 84, 10, WARN, 'left', 700, 3);
+      this.bar(x + 110, y + 80, pw - 128, 3, f, WARN);
+    } else {
+      // grenades as small hex icons
+      this.spaced('GRENADES', x + 18, y + 86, 9, '#8996a1', 'left', 700, 3);
+      for (let i = 0; i < 2; i++) {
+        const gx = x + 100 + i * 20, gy = y + 83;
+        g.beginPath();
+        for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; g[k ? 'lineTo' : 'moveTo'](gx + Math.cos(a) * 6, gy + Math.sin(a) * 6); }
+        g.closePath();
+        if (i < p.grenades) { g.fillStyle = WARN; g.fill(); } else { g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1; g.stroke(); }
+      }
     }
-    this.text(`GRENADES ${'●'.repeat(p.grenades)}${'○'.repeat(Math.max(0, 2 - p.grenades))}`, x, y + 88, 12, '#93a0ab', 'right');
-    const names = p.weapons.map((ws, i) => `${this.game.keyLabel('weapon' + (i + 1))} ${ws.def.short}`);
-    names.forEach((n, i) => this.text(n, x - 232 + i * 100, y - 36, 12, i === p.cur ? WARN : '#8a96a0', 'left', 700));
   }
 
   drawDamage(cx, cy, dt) {
@@ -515,23 +648,42 @@ export class HUD {
   }
 
   drawMessages(cx, dt) {
-    let y = this.H * 0.3;
+    let y = this.H * 0.28;
+    const g = this.g;
     for (const m of this.msgs) {
       m.t -= dt;
-      this.g.globalAlpha = clamp(m.t / 0.4, 0, 1);
-      this.text(m.text, cx, y, m.big ? 30 : 18, m.color, 'center', 700);
-      y += m.big ? 38 : 26;
+      g.globalAlpha = clamp(m.t / 0.4, 0, 1);
+      const size = m.big ? 26 : 15;
+      g.font = `700 ${size}px ${this.font}`;
+      const w = g.measureText(m.text).width + 60;
+      // thin rules either side, like a briefing banner
+      const grd = g.createLinearGradient(cx - w / 2 - 80, 0, cx + w / 2 + 80, 0);
+      grd.addColorStop(0, 'rgba(0,0,0,0)'); grd.addColorStop(0.2, 'rgba(6,10,16,0.55)'); grd.addColorStop(0.8, 'rgba(6,10,16,0.55)'); grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd; g.fillRect(cx - w / 2 - 80, y - size * 0.8, w + 160, size * 1.6);
+      g.fillStyle = m.color; g.globalAlpha *= 0.7;
+      g.fillRect(cx - w / 2 - 40, y - size * 0.8, w + 80, 1); g.fillRect(cx - w / 2 - 40, y + size * 0.8, w + 80, 1);
+      g.globalAlpha = clamp(m.t / 0.4, 0, 1);
+      this.spaced(m.text, cx, y + 1, size, m.color, 'center', 700, m.big ? 5 : 2.5);
+      y += m.big ? 46 : 32;
     }
-    this.g.globalAlpha = 1;
+    g.globalAlpha = 1;
     this.msgs = this.msgs.filter((m) => m.t > 0);
   }
 
   drawDeath(cx, cy) {
-    const game = this.game, p = game.player;
-    this.g.fillStyle = 'rgba(40,0,0,0.25)'; this.g.fillRect(0, 0, this.W, this.H);
-    this.text('ELIMINATED', cx, cy - 40, 40, DANGER, 'center', 700);
-    if (p.killedBy) this.text(`by ${p.killedBy.name} (${p.killCause})`, cx, cy, 18, '#e9eef2', 'center');
-    else this.text(`(${p.killCause || 'environment'})`, cx, cy, 18, '#e9eef2', 'center');
-    this.text(`Redeploying in ${Math.max(0, p.respawnT).toFixed(1)} s`, cx, cy + 34, 16, '#93a0ab', 'center');
+    const game = this.game, p = game.player, g = this.g;
+    const grd = g.createRadialGradient(cx, cy, 50, cx, cy, Math.max(cx, cy));
+    grd.addColorStop(0, 'rgba(60,0,0,0.15)'); grd.addColorStop(1, 'rgba(40,0,0,0.6)');
+    g.fillStyle = grd; g.fillRect(0, 0, this.W, this.H);
+    const w = 420, h = 150;
+    this.plate(cx - w / 2, cy - h / 2, w, h, 14, 'rgba(10,6,8,0.75)', 'rgba(255,75,58,0.5)');
+    g.fillStyle = DANGER; g.fillRect(cx - w / 2, cy - h / 2, w, 3);
+    this.spaced('ELIMINATED', cx, cy - 34, 30, DANGER, 'center', 800, 8, this.disp);
+    const by = p.killedBy ? `by ${p.killedBy.name}` : 'by the environment';
+    this.spaced(`${by}  ·  ${(p.killCause || '').toUpperCase()}`, cx, cy + 4, 15, '#e9eef2', 'center', 700, 2);
+    const f = 1 - Math.max(0, p.respawnT) / 4;
+    this.spaced(`REDEPLOYING IN ${Math.max(0, p.respawnT).toFixed(1)} s`, cx, cy + 36, 11, '#8996a1', 'center', 700, 3);
+    this.bar(cx - 150, cy + 50, 300, 3, f, DANGER);
   }
+
 }

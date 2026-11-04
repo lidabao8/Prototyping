@@ -553,6 +553,8 @@ export class Soldier {
     const w = this.weapon;
     if (w.def.kind === 'beam' || w.reloadT > 0 || w.mag >= w.def.mag || w.reserve <= 0) return false;
     w.reloadT = w.def.reload; w.cancel = false;
+    w.emptyReload = w.mag === 0;
+    if (!this.isPlayer && !w.def.perShell) this.game.dropMag(this, w);
     return true;
   }
 

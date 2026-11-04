@@ -7,8 +7,8 @@ import { HUD } from './hud.js';
 import { Bot } from './bot.js';
 import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR, HIT_THRESH } from './soldier.js';
 import { WEAPONS, WEAPON_IDS, WEAPON_BLURB } from './weapons.js';
-import { Graphics, PRESETS } from './graphics.js';
-import { buildFPArm } from './models.js';
+import { Graphics, PRESETS, normalizeGfx } from './graphics.js';
+import { buildFPArm, buildGrenade } from './models.js';
 import { THROW_TIME } from './soldier.js';
 import { clamp, rand, raySphere } from './math.js';
 
@@ -145,7 +145,7 @@ class Game {
     st.binds = { ...DEFAULT_BINDS, ...(saved.binds || {}) };
     st.rules = { ...DEFAULT_RULES, ...(saved.rules || {}) };
     if (!MAPS[st.map]) st.map = 'hangar';
-    st.gfx = { ...DEFAULTS.gfx, ...(saved.gfx || {}) };
+    st.gfx = normalizeGfx({ ...DEFAULTS.gfx, ...(saved.gfx || {}) });
     if (!Array.isArray(st.loadout) || st.loadout.length !== 2 || !st.loadout.every((id) => WEAPONS[id]) || st.loadout[0] === st.loadout[1]) st.loadout = [...DEFAULTS.loadout];
     return st;
   }
@@ -169,6 +169,7 @@ class Game {
     const g = this.settings.gfx;
     this.gfx.apply(g, this.world);
     this.fx.density = g.particles;
+    this.hud.setQuality(g);
     this.resize();
   }
 
@@ -189,12 +190,16 @@ class Game {
     }
     this.vmArmR = buildFPArm(TEAM_COLORS[0]); this.vmArmR.scale.setScalar(this.vmS); this.vm.add(this.vmArmR);
     this.vmArmL = buildFPArm(TEAM_COLORS[0]); this.vmArmL.scale.setScalar(this.vmS); this.vm.add(this.vmArmL);
-    this.vmNade = new THREE.Mesh(new THREE.IcosahedronGeometry(0.045, 1), new THREE.MeshStandardMaterial({ color: 0x333333, emissive: TEAM_COLORS[0], emissiveIntensity: 1.6 }));
+    this.vmNade = buildGrenade(TEAM_COLORS[0]);
+    this.vmNade.scale.setScalar(0.85);
+    this.vmNade.traverse((o) => { o.castShadow = false; });
     this.vmNade.visible = false; this.vm.add(this.vmNade);
     this.vmFlash = new THREE.PointLight(0xffaa66, 0, 6, 1.5);
     this.vmFlash.position.set(0.1, -0.05, -0.6);
     this.vm.add(this.vmFlash);
     this.vmSway = new THREE.Vector2(); this.vmMove = new THREE.Vector3();
+    this.vmShell = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.045, 10).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xb8322a, roughness: 0.5, metalness: 0.3 }));
+    this.vmShell.visible = false; this.vm.add(this.vmShell);
   }
 
   buildGrid() {
@@ -234,6 +239,7 @@ class Game {
     chk('optOutline', () => st.outlines, (v) => { st.outlines = v; });
     this.buildBindUI();
     this.setupLoadoutUI();
+    this.setupMenuChrome();
     const rng = (id, key, out, fmt) => {
       const el = $(id); if (!el) return;
       el.value = st[key];
@@ -259,23 +265,75 @@ class Game {
   setupGraphicsUI() {
     const $ = (id) => document.getElementById(id);
     const g = this.settings.gfx;
-    const sync = () => {
-      $('gPreset').value = g.preset; $('gScale').value = g.scale; $('gScaleV').textContent = Math.round(g.scale * 100) + '%';
-      $('gShadows').value = String(g.shadows); $('gBloom').checked = g.bloom; $('gAA').checked = g.aa;
-      $('gParticles').value = String(g.particles); $('gEnv').checked = g.env; $('gDmg').checked = this.settings.dmgNumbers;
-    };
     if (!$('gPreset')) return;
+    const pct = (v) => Math.round(v * 100) + '%';
+    const sliders = [['gScale', 'scale', pct], ['gBloom', 'bloom', (v) => (v > 0 ? pct(v) : 'Off')], ['gEnv', 'env', (v) => (v > 0 ? pct(v) : 'Off')], ['gParticles', 'particles', pct], ['gExposure', 'exposure', (v) => v.toFixed(2)]];
+    const sync = () => {
+      $('gPreset').value = g.preset; $('gShadows').value = String(g.shadows); $('gAA').value = String(g.aa);
+      for (const [id, k, f] of sliders) { $(id).value = g[k]; const o = $(id + 'V'); if (o) o.textContent = f(g[k]); }
+      $('gDmg').checked = this.settings.dmgNumbers;
+      for (const id of ['gPreset', 'gShadows', 'gAA']) if ($(id).refreshSeg) $(id).refreshSeg();
+    };
     const changed = (custom = true) => { if (custom) g.preset = 'custom'; this.saveSettings(); this.applyGraphics(); sync(); };
     $('gPreset').addEventListener('change', () => { const p = PRESETS[$('gPreset').value]; if (p) { Object.assign(g, p); g.preset = $('gPreset').value; } changed(false); });
-    $('gScale').addEventListener('change', () => { g.scale = Number($('gScale').value); changed(); });
-    $('gScale').addEventListener('input', () => { $('gScaleV').textContent = Math.round(Number($('gScale').value) * 100) + '%'; });
     $('gShadows').addEventListener('change', () => { g.shadows = Number($('gShadows').value); changed(); });
-    $('gBloom').addEventListener('change', () => { g.bloom = $('gBloom').checked; changed(); });
-    $('gAA').addEventListener('change', () => { g.aa = $('gAA').checked; changed(); });
-    $('gParticles').addEventListener('change', () => { g.particles = Number($('gParticles').value); changed(); });
-    $('gEnv').addEventListener('change', () => { g.env = $('gEnv').checked; changed(); });
+    $('gAA').addEventListener('change', () => { g.aa = Number($('gAA').value); changed(); });
+    for (const [id, k, f] of sliders) {
+      $(id).addEventListener('input', () => { const v = Number($(id).value); const o = $(id + 'V'); if (o) o.textContent = f(v); if (k === 'bloom' || k === 'exposure' || k === 'env') { g[k] = v; g.preset = 'custom'; this.applyGraphics(); } });
+      $(id).addEventListener('change', () => { g[k] = Number($(id).value); changed(); });
+    }
     $('gDmg').addEventListener('change', () => { this.settings.dmgNumbers = $('gDmg').checked; this.saveSettings(); });
+    this.syncGraphicsUI = sync;
     sync();
+  }
+
+  /** Replace a <select data-seg> with segmented buttons or cards that drive the hidden select. */
+  segmentify(sel, describe) {
+    const kind = sel.dataset.seg;
+    const wrap = document.createElement('div');
+    wrap.className = 'seg' + (kind === 'map' || kind === 'mode' ? ' cards ' + kind : '');
+    wrap.setAttribute('role', 'radiogroup');
+    const btns = [...sel.options].map((o) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('role', 'radio');
+      const d = describe && describe(o.value);
+      if (d) b.innerHTML = `<b>${o.textContent}</b><span>${d}</span>`; else b.textContent = o.textContent;
+      if (kind === 'map') b.style.backgroundImage = o.value === 'yard'
+        ? 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), radial-gradient(circle at 75% 120%, #3b6fb0 0 30%, transparent 31%), radial-gradient(1px 1px at 20% 30%, #fff, transparent), radial-gradient(1px 1px at 60% 20%, #fff, transparent), radial-gradient(1px 1px at 40% 60%, #cde, transparent), linear-gradient(135deg, #070b14, #0c1424)'
+        : 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), repeating-linear-gradient(90deg, rgba(159,232,255,0.08) 0 2px, transparent 2px 38px), repeating-linear-gradient(0deg, rgba(159,232,255,0.06) 0 2px, transparent 2px 38px), linear-gradient(135deg, #1a2430, #0d141c)';
+      b.addEventListener('click', () => { sel.value = o.value; sel.dispatchEvent(new Event('change')); refresh(); });
+      wrap.append(b);
+      return b;
+    });
+    const refresh = () => btns.forEach((b, i) => { const on = sel.options[i].value === sel.value; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+    sel.refreshSeg = refresh;
+    sel.classList.add('hidden-select');
+    sel.after(wrap);
+    refresh();
+  }
+
+  setupMenuChrome() {
+    const $ = (id) => document.getElementById(id);
+    // tabs
+    const tabs = [...document.querySelectorAll('.tab')];
+    tabs.forEach((t) => t.addEventListener('click', () => {
+      tabs.forEach((x) => x.classList.toggle('active', x === t));
+      document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === t.dataset.tab));
+      this.audio.init(); this.audio.play('mode');
+    }));
+    // segmented controls
+    const descs = { optMap: (v) => MAPS[v].desc, optMode: (v) => MODE_DESC[Number(v)] };
+    document.querySelectorAll('select[data-seg]').forEach((sel) => this.segmentify(sel, descs[sel.id]));
+    // match summary under the tabs
+    const st = this.settings;
+    const summary = () => {
+      const el = $('matchSummary'); if (!el) return;
+      el.innerHTML = `<span>MAP <b>${MAPS[st.map].name.toUpperCase()}</b></span><span>BOTS <b>${st.difficulty.toUpperCase()}</b></span><span><b>${st.teamSize}V${st.teamSize}</b></span><span>FIRST TO <b>${st.scoreLimit}</b></span><span>LOADOUT <b>${st.loadout.map((w) => WEAPONS[w].short).join(' + ')}</b></span>`;
+    };
+    for (const id of ['optMap', 'optDiff', 'optTeam', 'optScore', 'optPri', 'optSec']) { const el = $(id); if (el) el.addEventListener('change', summary); }
+    this.refreshSummary = summary;
+    summary();
+    window.addEventListener('keydown', (e) => { if ((e.code === 'Enter' || e.code === 'NumpadEnter') && this.state === 'menu' && !this.input.capture) { e.preventDefault(); this.audio.init(); this.newMatch(); } });
   }
 
   setupLoadoutUI() {
@@ -289,7 +347,10 @@ class Game {
       }
       for (const id of ['loadoutDesc', 'loadoutDesc2']) {
         const d = document.getElementById(id);
-        if (d) d.textContent = st.loadout.map((w) => `${WEAPONS[w].short}: ${WEAPON_BLURB[w]}`).join('  ·  ') + `  (carried mass ${st.loadout.reduce((m, w) => m + WEAPONS[w].mass, 0).toFixed(1)} kg)`;
+        const mass = st.loadout.reduce((m, w) => m + WEAPONS[w].mass, 0).toFixed(1);
+        if (d) d.textContent = id === 'loadoutDesc'
+          ? `Carried weapon mass ${mass} kg. Heavier loadouts accelerate a little slower on the same thrusters. Pick a slot, then a weapon.`
+          : st.loadout.map((w) => `${WEAPONS[w].short}: ${WEAPON_BLURB[w]}`).join('  ·  ') + `  (${mass} kg)`;
       }
     };
     for (const [a, b] of pairs) {
@@ -307,6 +368,54 @@ class Game {
       }
     }
     refresh();
+    this.buildWeaponCards(refresh);
+  }
+
+  /** Weapon cards with stat bars; clicking assigns to the active slot. */
+  buildWeaponCards(refreshText) {
+    const grid = document.getElementById('wgrid');
+    if (!grid) return;
+    const st = this.settings;
+    this.activeSlot = this.activeSlot || 0;
+    const stats = (d) => {
+      const dmg = d.kind === 'pellets' ? d.dmg * d.pellets : d.kind === 'beam' ? d.dps * 1.2 : d.dmg;
+      const rate = d.rpm;
+      const speed = d.kind === 'beam' ? 1 : d.kind === 'rocket' ? 0.55 : Math.min(1, d.speed / 420);
+      const recoil = d.ejecta != null ? d.ejecta : d.projMass ? d.projMass * d.speed : 0;
+      return [['DAMAGE', Math.min(1, dmg / 110)], ['FIRE RATE', Math.min(1, rate / 1200)], ['VELOCITY', speed], ['RECOIL', Math.min(1, recoil / 100)], ['MASS', Math.min(1, d.mass / 7)]];
+    };
+    const render = () => {
+      grid.innerHTML = '';
+      for (const id of WEAPON_IDS) {
+        const d = WEAPONS[id];
+        const slot = st.loadout.indexOf(id);
+        const c = document.createElement('button');
+        c.type = 'button'; c.className = 'wcard' + (slot >= 0 ? ' eq' : '');
+        c.innerHTML = `<span class="badge${slot >= 0 ? '' : ' none'}">${slot === 0 ? 'PRIMARY' : slot === 1 ? 'SECONDARY' : '—'}</span><span class="wn">${d.name}</span><span class="wb">${WEAPON_BLURB[id]}</span>` +
+          stats(d).map(([n, v]) => `<span class="stat">${n}<i style="--v:${Math.round(v * 100)}%"></i></span>`).join('');
+        c.addEventListener('click', () => {
+          const slotI = this.activeSlot;
+          const other = 1 - slotI;
+          if (st.loadout[other] === id) st.loadout[other] = st.loadout[slotI];
+          st.loadout[slotI] = id;
+          this.saveSettings();
+          for (const sid of ['optPri', 'optSec', 'optPri2', 'optSec2']) { const el = document.getElementById(sid); if (el) el.value = st.loadout[sid.startsWith('optPri') ? 0 : 1]; }
+          refreshText(); render(); if (this.refreshSummary) this.refreshSummary();
+          this.audio.init(); this.audio.play('reload');
+        });
+        grid.append(c);
+      }
+      for (const i of [0, 1]) {
+        const sb = document.getElementById('slot' + i), sn = document.getElementById('slot' + i + 'n');
+        if (sn) sn.textContent = WEAPONS[st.loadout[i]].name;
+        if (sb) sb.classList.toggle('on', this.activeSlot === i);
+      }
+    };
+    for (const i of [0, 1]) {
+      const sb = document.getElementById('slot' + i);
+      if (sb) sb.addEventListener('click', () => { this.activeSlot = i; render(); });
+    }
+    render();
   }
 
   /** Bots pick a loadout weighted by map, match settings, role and what is earning kills this match. */
@@ -366,6 +475,7 @@ class Game {
           }
           this.buildBindUI();
     this.setupLoadoutUI();
+    this.setupMenuChrome();
         };
       });
       row.append(l, b); box.append(row);
@@ -499,7 +609,7 @@ class Game {
     const loud = def.kind === 'rocket' ? 70 : def.kind === 'pellets' ? 55 : 48;
     for (const b of this.bots) b.hear(s, s.pos, loud);
     this.audio.play(def.sound, s.isPlayer ? 0 : this.distToListener(s.pos));
-    if (s.isPlayer) this.vmKick = (this.vmKick || 0) + (def.kind === 'pellets' ? 0.09 : def.kind === 'beam' ? 0.004 : def.id === 'recoilless' ? 0.12 : 0.025);
+    if (s.isPlayer) this.vmKick = (this.vmKick || 0) + (def.kind === 'pellets' ? 0.09 : def.kind === 'beam' ? 0 : def.id === 'recoilless' ? 0.12 : 0.025);
     if (s.isPlayer) this.vmFlash.intensity = 6;
   }
 
@@ -755,6 +865,7 @@ class Game {
   }
 
   tick(dt) {
+    this.frameDt = dt;
     if (this.state === 'playing') {
       this.time += dt;
       this.matchTime += dt;
@@ -801,7 +912,7 @@ class Game {
     const ads = p.adsAmt;
     // base pose: hip vs sight on the camera axis
     const hip = _v.set(0.17, -0.16, -0.34);
-    const adsP = new THREE.Vector3(-ud.sight.x * S, -ud.sight.y * S, -0.25 - ud.sight.z * S);
+    const adsP = new THREE.Vector3(-ud.sight.x * S, -ud.sight.y * S, -(ud.eyeRelief || 0.25) - ud.sight.z * S);
     const pos = hip.lerp(adsP, ads);
     const rot = new THREE.Euler(0, 0, 0, 'YXZ');
     // sway from mouse motion and RCS acceleration; breathing
@@ -820,32 +931,51 @@ class Game {
     const magOff = new THREE.Vector3();
     let magVis = true;
     const belt = new THREE.Vector3(-0.12, -0.5, -0.22);
+    let shellVis = false, magSpin = 0;
     if (w.reloadT > 0 && def.reload > 0) {
       const r = 1 - w.reloadT / def.reload;
       if (def.perShell) {
-        // shotgun: thumb shells into the loading port one at a time
-        rot.z += 0.35; rot.x += 0.12; pos.y -= 0.02;
+        // flechette: fetch a shell from the belt and thumb it into the loading port, one per cycle
+        rot.z += 0.38; rot.x += 0.14; pos.y -= 0.02;
         const port = this.gunPoint(gun, new THREE.Vector3(0, -0.06, -0.05), pos, rot);
-        handOverride = r < 0.45 ? belt.clone().lerp(port, sm(0.15, 0.45, r)) : port.clone().lerp(belt, sm(0.75, 1, r) * 0.6);
+        handOverride = r < 0.45 ? belt.clone().lerp(port, sm(0.12, 0.45, r)) : r < 0.7 ? port.clone().add(new THREE.Vector3(0, 0.012 * bell((r - 0.45) / 0.25), -0.02 * sm(0.45, 0.6, r))) : port.clone().lerp(belt, sm(0.72, 1, r) * 0.7);
+        shellVis = r > 0.12 && r < 0.55;
+        pos.y -= 0.006 * bell((r - 0.5) / 0.15);
       } else if (ud.breech) {
-        // recoilless: spent shell out the back, new one in
-        rot.x += 0.45 * bell(r); pos.y -= 0.04 * bell(r);
-        if (r < 0.35) magOff.z = 0.35 * sm(0.08, 0.35, r);
-        else if (r < 0.6) magVis = false;
-        else magOff.z = 0.35 * (1 - sm(0.6, 0.85, r));
+        // recoilless: breech swings open, spent casing drifts out the back, fresh round carried in
+        rot.x += 0.5 * bell(r); pos.y -= 0.05 * bell(r); rot.z += 0.15 * bell(r);
+        if (r < 0.3) magOff.z = 0.3 * sm(0.08, 0.3, r);
+        else if (r < 0.55) magVis = false;
+        else magOff.z = 0.36 * (1 - sm(0.55, 0.85, r));
+        if (this.prevReloadR != null && this.prevReloadR < 0.3 && r >= 0.3) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, 0.3, 1.4));
         const breech = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
-        handOverride = r < 0.35 ? null : r < 0.6 ? belt : r < 0.88 ? breech : null;
+        handOverride = r < 0.3 ? null : r < 0.55 ? belt.clone().lerp(breech, sm(0.42, 0.55, r)) : r < 0.88 ? breech : null;
       } else {
-        rot.z += 0.5 * bell(r); rot.x += 0.22 * bell(r); pos.y -= 0.035 * bell(r);
-        if (r > 0.08 && r < 0.32) magOff.y = -0.35 * sm(0.08, 0.32, r);
-        else if (r >= 0.32 && r < 0.55) magVis = false;
-        else if (r >= 0.55 && r < 0.82) magOff.y = -0.3 * (1 - sm(0.55, 0.82, r));
+        // box / drum magazines: tilt, release, the old one floats away, new one seated with a slap
+        const drum = !!ud.drum;
+        rot.z += (drum ? 0.75 : 0.5) * bell(r); rot.x += 0.22 * bell(r); pos.y -= 0.035 * bell(r);
+        if (r > 0.08 && r < 0.26) magOff.y = -0.12 * sm(0.08, 0.26, r);
+        else if (r >= 0.26 && r < 0.55) magVis = false;
+        else if (r >= 0.55 && r < 0.8) magOff.y = -0.3 * (1 - sm(0.55, 0.8, r));
+        if (this.prevReloadR != null && this.prevReloadR < 0.26 && r >= 0.26) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, -1.2, 0.2));
+        if (drum && r > 0.8 && r < 0.95) magSpin = sm(0.8, 0.95, r) * Math.PI * 2;
         const magW = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
-        handOverride = r < 0.1 ? null : r < 0.3 ? magW : r < 0.55 ? belt : r < 0.84 ? magW.clone().add(new THREE.Vector3(0, -0.03, 0)) : null;
-        if (r > 0.82 && r < 0.92) pos.y += 0.012; // slap
+        handOverride = r < 0.08 ? null : r < 0.26 ? magW : r < 0.55 ? belt.clone().lerp(magW, sm(0.45, 0.55, r)) : r < 0.82 ? magW.clone().add(new THREE.Vector3(0, -0.03, 0)) : null;
+        if (r > 0.8 && r < 0.88) pos.y += 0.014 * bell((r - 0.8) / 0.08); // slap
+        // racking the charging handle after an empty reload
+        if (w.emptyReload && r > 0.86) {
+          const q = sm(0.86, 0.93, r) - sm(0.95, 1, r);
+          const ch = this.gunPoint(gun, new THREE.Vector3(-0.05, 0.04, 0.02 + 0.08 * q), pos, rot);
+          handOverride = ch; rot.y += 0.12 * q; pos.x += 0.02 * q;
+        }
       }
+      this.prevReloadR = r;
+    } else this.prevReloadR = null;
+    if (def.kind === 'beam' && w.overheat) {
+      // vent: tilt the emitter, slide the cell out, steam out of the vents
+      rot.z += 0.35; rot.x += 0.22; magOff.x = -0.035; magOff.z = 0.02;
+      if (Math.random() < 0.5) { const vp = this.camera.localToWorld(this.gunPoint(gun, new THREE.Vector3(-0.06, 0.05, -0.1), pos, rot)); this.fx.gasJet(vp, _v.set(-1, 0.5, 0).applyQuaternion(this.camera.quaternion), p.vel, 1.5); }
     }
-    if (def.kind === 'beam' && w.overheat) { rot.z += 0.3; rot.x += 0.2; magOff.z = 0.06; }
     if (ud.pump && w.reloadT <= 0) {
       // pump cycles after each shot
       const since = t - p.lastFireT;
@@ -869,15 +999,45 @@ class Game {
     this.vmHolder.position.copy(pos);
     this.vmHolder.quaternion.setFromEuler(rot);
     ud.mag.position.copy(ud.magRest).add(magOff);
+    ud.mag.rotation.x = magSpin;
     ud.mag.visible = magVis;
+    // muzzle in camera space (rounds and beams leave from here)
+    this.vmMuzzleCam = this.gunPoint(gun, ud.muzzle, pos, rot);
     // arms
     const gripW = this.gunPoint(gun, ud.grip, pos, rot);
     const handW = handOverride || this.gunPoint(gun, ud.pump ? ud.hand.clone().add(new THREE.Vector3(0, 0, magOff.z)) : ud.hand, pos, rot);
     this.placeArm(this.vmArmR, gripW, new THREE.Vector3(0.36, -0.62, 0.18));
     this.placeArm(this.vmArmL, handW, new THREE.Vector3(-0.4, -0.58, 0.05));
     this.vmNade.visible = nadeVis;
+    this.vmShell.visible = shellVis;
+    if (shellVis) this.vmShell.position.copy(handW).add(new THREE.Vector3(0.01, 0.03, -0.03));
     if (nadeVis) this.vmNade.position.copy(handW).add(new THREE.Vector3(0.0, 0.035, -0.04));
     this.vmFlash.intensity *= Math.exp(-dt * 30);
+  }
+
+  /** Third-person: a bot's spent magazine floats away from its gun. */
+  dropMag(s, w) {
+    const gm = s.gunMeshes[w.def.id];
+    if (!gm || this.distToListener(s.pos) > 60) return;
+    const mesh = gm.userData.mag.clone(true);
+    mesh.visible = true;
+    mesh.position.copy(_v.set(0.13, 0.25, -0.5).applyQuaternion(s.quat).add(s.pos));
+    mesh.quaternion.copy(s.quat);
+    const vel = _v2.set(rand(-0.3, 0.3), -1, 0.3).applyQuaternion(s.quat).add(s.vel);
+    this.fx.debris(mesh, vel.clone(), new THREE.Vector3(rand(-4, 4), rand(-4, 4), rand(-4, 4)), 6);
+  }
+
+  /** Spent magazine / casing: a world-space copy of the mag that drifts and tumbles away in zero-g. */
+  ejectDebris(gun, ud, pos, rot, magOff, p, kickCam) {
+    const local = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
+    const wpos = this.camera.localToWorld(local.clone());
+    const mesh = ud.mag.clone(true);
+    mesh.visible = true;
+    mesh.scale.setScalar(this.vmS);
+    mesh.position.copy(wpos);
+    mesh.quaternion.copy(this.camera.quaternion).multiply(_q.setFromEuler(rot));
+    const vel = kickCam.clone().applyQuaternion(this.camera.quaternion).add(p.vel);
+    this.fx.debris(mesh, vel, new THREE.Vector3(rand(-4, 4), rand(-4, 4), rand(-4, 4)), 6);
   }
 
   /** Gun-local point -> camera space for a given holder pose. */
@@ -955,7 +1115,8 @@ class Game {
     }
     cam.updateMatrixWorld();
     for (const k in this.vmGuns) this.vmGuns[k].visible = p.alive && k === p.weapon.def.id;
-    this.vm.visible = p.alive;
+    this.scoped = p.alive && !!ud.scope && p.adsAmt > 0.9;
+    this.vm.visible = p.alive && !this.scoped;
     if (p.alive) this.animateViewmodel(p, gun, dt);
     // reference grid: on demand or when tumbling
     const tumble = p.alive && p.angVel.length() > 1.4;

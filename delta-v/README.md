@@ -34,12 +34,13 @@ npm run build      # or: npm run watch / npm run serve (http://localhost:8081)
 * **Loadout:** pick a primary and a secondary in the menu (or from the pause menu, for your next deploy). Weapon mass counts towards your suit's mass.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
   * **FL-12 flechette:** heavy recoil (about 0.75 m/s per shot). It doubles as an escape burn.
-  * **GJ-3 gyrojet:** nearly recoilless. The rounds launch slowly and accelerate, with a small splash.
-  * **RR-90 recoilless:** a single 88-damage slug and no recoil, but the backblast shoves (and hurts enemies) up to 7 m behind you.
-  * **LM-2 maser:** hitscan beam with no recoil and no ammo. It overheats after about 2 s of continuous fire.
+  * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius and a small splash.
+  * **RR-90 recoilless:** a single 88-damage HE slug with a 4 m blast and no recoil. The slug homes slightly: it locks the enemy nearest the crosshair within about 7° (shown as TRACK) and steers at up to 90 m/s² sideways. The backblast shoves (and hurts enemies) up to 7 m behind you. Fully aimed, it switches to a full-screen scope.
+  * **LM-2 maser:** a continuous yellow beam, 55 damage per second while held. No recoil, no ammo; it overheats after about 2 s of fire and vents.
 * **Grenades:** thrown at 18 m/s on a 3.5 s fuse. They fly straight, bounce elastically off walls, and leave the hand partway through a throw animation.
 * **Momentum hammer (V):** sends the target tumbling.
 * **Hip-fire vs aiming:** hip-fire spreads several times wider than aiming down the sights. Every gun has a working sight (holographic sights on the rifle, flechette and maser; scopes on the gyrojet and recoilless), aligned to the screen centre when you aim, with its own magnification. Bots aim down the sights once they've settled on a target at range.
+* **Tracers:** every round leaves the actual barrel (your viewmodel's muzzle, or a bot's gun) and converges on the crosshair point, drawn as a glowing streak.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
 * **Wall and pod impacts:** hitting a wall above 8 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
 
@@ -56,14 +57,15 @@ There are also options for infinite gas and enemy outlines.
 
 ## Graphics
 
-**Quality presets:** Low, Medium, High and Ultra, plus individual settings:
+**Quality presets:** Low, Medium, High and Ultra, plus individual tiers and sliders:
 
-* Render scale.
-* Sun shadows, which follow you so they stay crisp on the big map.
-* Bloom on lights, thrusters, beams and muzzle flashes.
-* 4× MSAA.
-* Particle density.
-* Environment reflections on metal.
+* Render scale (50–150%).
+* Sun shadows (Off / Low / High / Ultra), which follow you so they stay crisp on the big map.
+* Anti-aliasing (Off / 2× / 4× / 8× MSAA).
+* Bloom intensity (0–150%).
+* Reflection strength (0–150%).
+* Particle density (20–100%).
+* Exposure.
 
 **Models and textures:**
 
@@ -74,15 +76,39 @@ There are also options for infinite gas and enemy outlines.
 **Animations:** first-person and third-person animations for:
 
 * recoil;
-* magazine reloads (mag drops, the hand fetches a new one);
-* shell-by-shell flechette reloads;
+* magazine reloads: the empty mag floats away in zero-g, the hand fetches a new one and slaps it in, and empty reloads end with a charging-handle rack;
+* the gyrojet's drum swap, finished with a spin;
+* shell-by-shell flechette reloads, with a visible shell in the hand;
 * the flechette pump after each shot;
-* recoilless breech loading;
-* maser venting when overheated;
+* recoilless breech loading: the spent casing drifts out the back;
+* maser venting when overheated: the cell slides out and steam escapes;
 * grenade wind-up and throw;
 * hammer strikes;
 * weapon swaps;
 * view sway from mouse movement and RCS thrust.
+
+## Interface
+
+**Main menu:** four tabs.
+
+* **Play:** map cards; segmented controls for difficulty, team size and score limit; flight-computer cards.
+* **Loadout:** primary and secondary slots, plus weapon cards with stat bars.
+* **Settings:** player, graphics and physics.
+* **Controls:** keybinds.
+
+A sticky footer shows a match summary and the Deploy button (Enter also deploys).
+
+**In-game HUD:** clipped-corner glass plates and Orbitron numerals.
+
+* A team score header with a timer.
+* A vitals cluster: Δv ring gauge, segmented health, O₂ and a suit diagram.
+* A weapon cluster with ammo pips and grenade icons.
+* Kill-feed chips and banner messages.
+* A redesigned death screen.
+
+**Sights:** sci-fi holographic sights with simple reticles (dot and ticks, broken ring, chevron, bars), and square scopes with a glowing objective ring.
+
+**Grenades:** a detailed model with a ribbed body, team band, fuse head, spoon, pin ring, and a fuse lamp that blinks faster as it runs down.
 
 ## HUD
 

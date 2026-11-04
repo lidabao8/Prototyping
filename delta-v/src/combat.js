@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { raySphere, randomPerp, rand } from './math.js';
+import { raySphere, randomPerp, rand, interceptTime } from './math.js';
 import { HITBOXES, TOWERS, THROW_TIME } from './soldier.js';
 import { GRENADE, MELEE } from './weapons.js';
 import { COLORS } from './effects.js';
+import { buildGrenade } from './models.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
 const _hc = new THREE.Vector3();
@@ -13,9 +14,7 @@ export class Combat {
     this.projectiles = [];
     this.grenades = [];
     this.beams = [];
-    const gGeo = new THREE.IcosahedronGeometry(0.12, 0);
-    this.gGeo = gGeo;
-    this.gMat = [0x3f8cff, 0xff8a2a].map((c) => new THREE.MeshStandardMaterial({ color: 0x333333, emissive: c, emissiveIntensity: 0.9 }));
+    this.gProto = [0x3f8cff, 0xff8a2a].map((c) => buildGrenade(c));
     this.rGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.22, 6).rotateX(Math.PI / 2);
     this.rMat = new THREE.MeshStandardMaterial({ color: 0x999999, emissive: 0xff5520, emissiveIntensity: 0.4 });
     this.colors = {};
@@ -30,8 +29,23 @@ export class Combat {
     return (hip + (ads - hip) * (s.adsAmt || 0)) * (s.grab ? 0.7 : 1);
   }
 
+  /** World position of the barrel tip: the first-person gun for the player, the held gun for everyone else. */
   muzzlePoint(s, out) {
-    return out.set(0.18, -0.14, -0.85).applyQuaternion(s.aimQuat(_q)).add(s.eye(_v3));
+    const g = this.game;
+    if (s.isPlayer && g.vmMuzzleCam && g.vm && g.vm.visible) return g.camera.localToWorld(out.copy(g.vmMuzzleCam));
+    const gm = s.gunMeshes && s.gunMeshes[s.weapon.def.id];
+    const m = gm && gm.userData.muzzle;
+    out.set(0.13 + (m ? m.x : 0), 0.35 + (m ? m.y : 0), -0.4 + (m ? m.z : -0.75));
+    return out.applyQuaternion(s.quat).add(s.pos);
+  }
+
+  /** Where the crosshair points: first surface or body along the sight line (rounds converge on it). */
+  aimPoint(s, eye, aim, out) {
+    const h = this.game.world.raycast(eye, aim, 400);
+    let t = h ? h.t : 400;
+    const hs = this.raySoldier(eye, aim, t, s);
+    if (hs) t = hs.t;
+    return out.copy(eye).addScaledVector(aim, Math.max(2, t));
   }
 
   /** Attempt to fire the current weapon. Returns true when a shot went off. */
@@ -54,16 +68,24 @@ export class Combat {
     const eye = s.eye(new THREE.Vector3());
     const aim = s.aimDir(new THREE.Vector3());
     const muzzle = this.muzzlePoint(s, new THREE.Vector3());
+    // fire from the barrel toward the crosshair point (unless the barrel is poking through a wall)
+    const toM = _v2.subVectors(muzzle, eye);
+    const ml = toM.length();
+    const blocked = ml > 1e-3 && this.game.world.raycast(eye, toM.divideScalar(ml), ml + 0.05);
+    const origin = blocked ? eye.clone().addScaledVector(aim, 0.3) : muzzle.clone();
+    const target = this.aimPoint(s, eye, aim, new THREE.Vector3());
+    const base = target.sub(origin).normalize();
     const n = def.kind === 'pellets' ? def.pellets : 1;
+    const lock = def.homing ? this.homingTarget(s, eye, aim, def.homing.cone) : null;
     for (let i = 0; i < n; i++) {
-      const d = aim.clone();
+      const d = base.clone();
       const sp = this.spreadOf(s, def) * Math.sqrt(Math.random());
-      if (sp > 0) d.addScaledVector(randomPerp(aim, _v), Math.tan(sp)).normalize();
+      if (sp > 0) d.addScaledVector(randomPerp(base, _v), Math.tan(sp)).normalize();
       const p = {
-        pos: eye.clone().addScaledVector(d, 0.35), vel: s.vel.clone().addScaledVector(d, def.speed),
-        dir: d, owner: s, def, age: 0, kind: def.kind, color: this.color(def.tracer), tail: def.kind === 'rocket' ? 0.02 : 0.012,
-        visOff: muzzle.clone().sub(eye), // tracer starts at the muzzle and converges onto the sight line
+        pos: origin.clone(), vel: s.vel.clone().addScaledVector(d, def.speed), start: origin.clone(),
+        dir: d, owner: s, def, age: 0, kind: def.kind, color: this.color(def.tracer), tail: def.kind === 'rocket' ? 0.02 : (def.tracerLen || 4) / def.speed,
       };
+      if (lock) p.homing = lock;
       if (def.kind === 'rocket') {
         p.mesh = new THREE.Mesh(this.rGeo, this.rMat);
         p.mesh.position.copy(p.pos); p.mesh.lookAt(_v.copy(p.pos).add(d));
@@ -84,6 +106,37 @@ export class Combat {
     return true;
   }
 
+  /** Enemy closest to the line of fire inside the guidance cone, with line of sight. */
+  homingTarget(s, eye, aim, cone) {
+    let best = null, bestA = cone;
+    for (const o of this.game.soldiers) {
+      if (!o.alive || o.team === s.team) continue;
+      const d = _v.subVectors(o.pos, eye);
+      const dist = d.length();
+      const a = Math.acos(Math.max(-1, Math.min(1, d.dot(aim) / dist)));
+      if (a < bestA && dist < 250 && this.game.world.los(eye, o.pos)) { bestA = a; best = o; }
+    }
+    return best;
+  }
+
+  /** Steer a guided round toward its target's intercept point with limited lateral acceleration. */
+  guide(p, dt) {
+    const t = p.homing;
+    if (!t.alive || p.age > 2.5) { p.homing = null; return; }
+    const sp = p.vel.length();
+    const u = _v.copy(p.vel).divideScalar(sp);
+    const rel = _v2.subVectors(t.pos, p.pos);
+    const tt = interceptTime(rel, t.vel, sp);
+    if (tt > 0) rel.addScaledVector(t.vel, tt);
+    const d = rel.normalize();
+    if (d.dot(u) < 0.85) { p.homing = null; return; } // overshot or target broke away: go ballistic
+    const lat = d.addScaledVector(u, -d.dot(u));
+    const l = lat.length();
+    if (l < 1e-6) return;
+    const acc = Math.min(p.def.homing.accel, l * sp * 25);
+    p.vel.addScaledVector(lat, acc * dt / l).setLength(sp);
+  }
+
   /** First soldier hit along a ray (hitbox spheres). */
   raySoldier(o, dir, maxT, skip) {
     let best = maxT, sol = null, part = null;
@@ -101,12 +154,13 @@ export class Combat {
     return sol ? { t: best, s: sol, part } : null;
   }
 
+  /** Continuous beam: called every frame the trigger is held; damage scales with frame time. */
   fireBeam(s, w, def) {
     const g = this.game;
     if (w.overheat) { if (s.isPlayer && w.cool <= 0) { g.audio.play('empty'); w.cool = 0.3; } return false; }
-    w.cool = 60 / def.rpm;
-    w.heat += def.heatPer;
-    if (w.heat >= 1) { w.heat = 1; w.overheat = true; if (s.isPlayer) g.hud.message('MASER OVERHEATED', '#ffcc4d', 1.2); }
+    const dt = Math.min(0.05, g.frameDt || 1 / 60);
+    w.heat += def.heatRate * dt;
+    if (w.heat >= 1) { w.heat = 1; w.overheat = true; if (s.isPlayer) g.hud.message('MASER OVERHEATED – VENTING', '#ffcc4d', 1.2); }
     s.spawnProtect = 0;
     s.lastFireT = g.time;
     const eye = s.eye(new THREE.Vector3());
@@ -118,21 +172,24 @@ export class Combat {
     if (hit) end = hit.t;
     const hp = eye.clone().addScaledVector(d, end);
     const muzzle = this.muzzlePoint(s, new THREE.Vector3());
-    this.beams.push({ a: muzzle, b: hp, life: 0.06 });
+    // one live beam per shooter, refreshed each frame
+    if (!s.beam || s.beam.life <= 0) { s.beam = { a: new THREE.Vector3(), b: new THREE.Vector3(), life: 0 }; this.beams.push(s.beam); }
+    s.beam.a.copy(muzzle); s.beam.b.copy(hp); s.beam.life = 0.07;
     if (hit) {
       const t = hit.s;
       if (t.team !== s.team && t.spawnProtect <= 0) {
-        const dmg = def.dmg * (hit.part.part === 'head' ? def.headMul : hit.part.part === 'leg' ? 0.75 : 1);
-        if (g.rules.breaches && hit.part.part !== 'leg' && Math.random() < 0.04 && t.leaks.length < 3) {
+        const dmg = def.dps * dt * (hit.part.part === 'head' ? def.headMul : hit.part.part === 'leg' ? 0.75 : 1);
+        if (g.rules.breaches && hit.part.part !== 'leg' && Math.random() < 0.2 * dt && t.leaks.length < 3) {
           const bp = hp.clone().sub(t.pos).applyQuaternion(_q.copy(t.quat).invert());
           t.leaks.push({ p: bp, n: bp.clone().sub(hit.part.p).normalize(), t: 4 });
         }
         g.damage(t, dmg, s, def.id, hp, hit.part.part);
       }
-      if (Math.random() < 0.4) g.fx.sparks(hp, 2, d.clone().negate(), 3, COLORS.cyan);
-    } else if (h && Math.random() < 0.5) g.fx.sparks(hp, 2, h.n, 3, COLORS.cyan);
-    w.sndT = (w.sndT || 0) - 1;
-    if (w.sndT <= 0) { w.sndT = 3; g.onShot(s, def); }
+    }
+    if (Math.random() < 0.6) g.fx.sparks(hp, 2, hit ? d.clone().negate() : (h ? h.n : d.clone().negate()), 3, COLORS.beam);
+    if (Math.random() < 0.3) g.fx.add.spawn(hp, null, COLORS.beam, 0.35, 0.06);
+    w.sndT = (w.sndT || 0) - dt;
+    if (w.sndT <= 0) { w.sndT = 0.12; g.onShot(s, def); }
     return true;
   }
 
@@ -173,7 +230,11 @@ export class Combat {
     const pos = s.eye(new THREE.Vector3()).addScaledVector(aim, 0.6);
     const vel = s.vel.clone().addScaledVector(aim, GRENADE.speed);
     s.applyImpulse(_v.copy(aim).multiplyScalar(-GRENADE.mass * GRENADE.speed), pos, 'recoil');
-    const mesh = new THREE.Mesh(this.gGeo, this.gMat[s.team]);
+    const mesh = this.gProto[s.team].clone(true);
+    mesh.scale.setScalar(1.4);
+    // each grenade blinks on its own fuse
+    const lamp = mesh.children.find((c) => c.geometry && c.geometry.type === 'SphereGeometry');
+    if (lamp) { lamp.material = lamp.material.clone(); mesh.userData.lamp = lamp; mesh.userData.lampColor = lamp.material.color.clone(); }
     mesh.position.copy(pos);
     this.game.scene.add(mesh);
     this.grenades.push({ pos, vel, owner: s, fuse: GRENADE.fuse, mesh, spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)) });
@@ -227,6 +288,7 @@ export class Combat {
       const p = list[i];
       p.age += dt;
       if (p.kind === 'rocket' && p.age < p.def.burn) p.vel.addScaledVector(p.dir, p.def.accel * dt);
+      if (p.homing) this.guide(p, dt);
       const sp = p.vel.length();
       const dir = _v.copy(p.vel).divideScalar(sp);
       const len = sp * dt;
@@ -239,10 +301,10 @@ export class Combat {
         // coarse reject: distance from segment to soldier centre
         const rel = _v2.subVectors(s.pos, p.pos);
         const along = Math.max(0, Math.min(len, rel.dot(dir)));
-        if (rel.addScaledVector(dir, -along).lengthSq() > 1.8) continue;
+        if (rel.addScaledVector(dir, -along).lengthSq() > 1.8 + (p.def.projRadius || 0) * 3) continue;
         for (const hb of HITBOXES) {
           _hc.copy(hb.p).applyQuaternion(s.quat).add(s.pos);
-          const t = raySphere(p.pos, dir, _hc, hb.r, bestT);
+          const t = raySphere(p.pos, dir, _hc, hb.r + (p.def.projRadius || 0), bestT);
           if (t >= 0 && t < bestT) { bestT = t; hitKind = 'soldier'; hitObj = s; hitPart = hb; }
         }
       }
@@ -253,7 +315,6 @@ export class Combat {
         continue;
       }
       p.pos.addScaledVector(p.vel, dt);
-      if (p.visOff) { p.visOff.multiplyScalar(Math.exp(-dt * 25)); }
       if (p.age > 3.5) this.removeProj(i);
     }
     for (const b of this.beams) b.life -= dt;
@@ -316,10 +377,10 @@ export class Combat {
         g.damage(s, dmg, p.owner, def.id, hp, part.part);
       }
       g.fx.suitHit(hp, dir.clone().negate(), s.vel);
-      if (def.kind === 'rocket') this.explode(hp, p.owner, def.splash, def.splashDmg, 140, def.id, s);
+      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id, s);
     } else {
       if (kind === 'pod') obj.vel.addScaledVector(dir, (def.kind === 'rocket' ? 60 : momentum) / obj.mass);
-      if (def.kind === 'rocket') this.explode(hp, p.owner, def.splash, def.splashDmg, 140, def.id);
+      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id);
       else {
         g.fx.impact(hp, n || dir.clone().negate());
         const d = g.distToListener(hp);
@@ -374,8 +435,11 @@ export class Combat {
     for (const gr of this.grenades) {
       gr.mesh.position.copy(gr.pos);
       gr.mesh.rotation.x += gr.spin.x * dt; gr.mesh.rotation.y += gr.spin.y * dt;
-      const blink = (gr.fuse % 0.5) < 0.12 || gr.fuse < 0.6;
-      gr.mesh.material.emissiveIntensity = blink ? 2.5 : 0.5;
+      // fuse lamp blinks faster as it runs down
+      const period = gr.fuse < 1 ? 0.15 : 0.5;
+      const blink = (gr.fuse % period) < period * 0.35;
+      const lamp = gr.mesh.userData.lamp;
+      if (lamp) lamp.material.color.copy(gr.mesh.userData.lampColor).multiplyScalar(blink ? 1.6 : 0.15);
     }
   }
 
@@ -385,15 +449,16 @@ export class Combat {
     out.length = 0;
     for (const p of this.projectiles) {
       if (p.kind === 'rocket') continue;
-      const vp = p._vp || (p._vp = new THREE.Vector3());
-      vp.copy(p.pos).add(p.visOff);
-      out.push({ pos: vp, vel: p.vel, color: p.color, tail: Math.min(p.tail, p.age + 0.004) });
+      // streak never extends behind the muzzle it left from
+      const travelled = p.pos.distanceTo(p.start);
+      const sp = p.vel.length();
+      out.push({ pos: p.pos, vel: p.vel, color: p.color, tail: Math.min(p.tail, travelled / Math.max(1, sp)), width: p.def.tracerW || 0.03 });
     }
-    const bc = this.color(0x9ff0ff);
+    const bc = this.color(0xffd23a);
     for (const b of this.beams) {
       b._v = b._v || new THREE.Vector3();
       b._v.subVectors(b.b, b.a);
-      out.push({ pos: b.b, vel: b._v, color: bc, tail: 1 });
+      out.push({ pos: b.b, vel: b._v, color: bc, tail: 1, width: 0.035, beam: true });
     }
     return out;
   }

@@ -105,7 +105,7 @@ class ParticleSet {
 }
 
 const C = (hex) => new THREE.Color(hex);
-const COLORS = { spark: C(0xffc977), white: C(0xffffff), gas: C(0xc8d8ea), fire: C(0xff7a2a), smoke: C(0x5a5f66), blood: C(0xa01818), cyan: C(0x9fe8ff) };
+const COLORS = { beam: C(0xffd23a), spark: C(0xffc977), white: C(0xffffff), gas: C(0xc8d8ea), fire: C(0xff7a2a), smoke: C(0x5a5f66), blood: C(0xa01818), cyan: C(0x9fe8ff) };
 
 export class Effects {
   constructor(scene) {
@@ -124,6 +124,18 @@ export class Effects {
     this.tracers.frustumCulled = false;
     this.trGeo = g; this.trMax = MAXT;
     scene.add(this.tracers);
+    // volumetric streaks: instanced cylinders along each round's path (bloom makes them glow)
+    const MAXI = 320;
+    const cg = new THREE.CylinderGeometry(0.5, 0.5, 1, 6, 1, true).rotateX(Math.PI / 2);
+    this.streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.streaks = new THREE.InstancedMesh(cg, this.streakMat, MAXI);
+    this.streaks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.streaks.setColorAt(0, new THREE.Color());
+    this.streaks.frustumCulled = false;
+    this.streaks.count = 0;
+    scene.add(this.streaks);
+    this.streakMax = MAXI;
+    this._m4 = new THREE.Matrix4(); this._q4 = new THREE.Quaternion(); this._s4 = new THREE.Vector3(); this._c4 = new THREE.Color(); this._z = new THREE.Vector3(0, 0, 1);
     // flash lights
     this.lights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffaa55, 0, 40, 1.2); scene.add(l); return { l, t: 0, i0: 0 }; });
     // decals
@@ -219,7 +231,26 @@ export class Effects {
     L.l.position.copy(p); L.l.color.setHex(color); L.t = 0.25; L.i0 = intensity; L.l.intensity = intensity;
   }
 
+  /** Cosmetic drifting objects (spent mags, casings): constant velocity and spin, shrink out at the end. */
+  debris(mesh, vel, spin, life) {
+    this.debrisList = this.debrisList || [];
+    mesh.traverse((o) => { o.castShadow = false; });
+    this.scene.add(mesh);
+    this.debrisList.push({ mesh, vel, spin, life, max: life, s0: mesh.scale.x });
+    if (this.debrisList.length > 24) { const d = this.debrisList.shift(); this.scene.remove(d.mesh); }
+  }
+
   update(dt, tracerList) {
+    if (this.debrisList) {
+      for (const d of this.debrisList) {
+        d.life -= dt;
+        d.mesh.position.addScaledVector(d.vel, dt);
+        d.mesh.rotation.x += d.spin.x * dt; d.mesh.rotation.y += d.spin.y * dt; d.mesh.rotation.z += d.spin.z * dt;
+        if (d.life < 1) d.mesh.scale.setScalar(d.s0 * Math.max(0.01, d.life));
+        if (d.life <= 0) this.scene.remove(d.mesh);
+      }
+      this.debrisList = this.debrisList.filter((d) => d.life > 0);
+    }
     this.add.update(dt);
     this.alpha.update(dt);
     for (const L of this.lights) { if (L.t > 0) { L.t -= dt; L.l.intensity = Math.max(0, L.i0 * L.t / 0.25); } else L.l.intensity = 0; }
@@ -238,6 +269,28 @@ export class Effects {
     }
     this.trGeo.setDrawRange(0, n * 2);
     this.trA.needsUpdate = this.trC.needsUpdate = true;
+    // streak instances (two per beam: hot core + soft glow)
+    let k = 0;
+    const put = (mid, dir, len, w, col, mul) => {
+      if (k >= this.streakMax) return;
+      this._q4.setFromUnitVectors(this._z, dir);
+      this._m4.compose(mid, this._q4, this._s4.set(w, w, len));
+      this.streaks.setMatrixAt(k, this._m4);
+      this.streaks.setColorAt(k, this._c4.copy(col).multiplyScalar(mul));
+      k++;
+    };
+    const mid = this._v, dir = this._v2;
+    for (const t of tracerList) {
+      const len = t.vel.length() * t.tail;
+      if (len < 0.05) continue;
+      dir.copy(t.vel).normalize();
+      mid.copy(t.pos).addScaledVector(dir, -len / 2);
+      if (t.beam) { put(mid, dir, len, t.width, t.color, 3.2); put(mid, dir, len, t.width * 4, t.color, 0.5); }
+      else put(mid, dir, len, t.width, t.color, 2.4);
+    }
+    this.streaks.count = k;
+    this.streaks.instanceMatrix.needsUpdate = true;
+    if (this.streaks.instanceColor) this.streaks.instanceColor.needsUpdate = true;
   }
 }
 export { COLORS };
