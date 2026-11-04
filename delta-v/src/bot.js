@@ -4,6 +4,7 @@ import { GAS_MAX, NOZZLE_F } from './soldier.js';
 import { GRENADE, MELEE } from './weapons.js';
 
 export const SKILLS = {
+  easy: { reaction: 0.65, err0: 11, settle: 0.85, floor: 2.2, track: 130, velNoise: 0.45, velLag: 0.8, fov: 55, head: 0, jink: 0.3, grenade: 0.015, dodge: 0.05, range: 110, burstPause: 0.6 },
   normal: { reaction: 0.4, err0: 7, settle: 0.55, floor: 1.2, track: 220, velNoise: 0.25, velLag: 0.45, fov: 65, head: 0.03, jink: 0.6, grenade: 0.05, dodge: 0.3 },
   hard: { reaction: 0.25, err0: 4.5, settle: 0.34, floor: 0.6, track: 360, velNoise: 0.12, velLag: 0.3, fov: 78, head: 0.15, jink: 1.0, grenade: 0.1, dodge: 0.65 },
   elite: { reaction: 0.17, err0: 3, settle: 0.24, floor: 0.33, track: 520, velNoise: 0.06, velLag: 0.18, fov: 85, head: 0.35, jink: 1.2, grenade: 0.14, dodge: 0.9 },
@@ -72,7 +73,7 @@ export class Bot {
       const d = _v.subVectors(e.pos, eye);
       const dist = d.length();
       let vis = false;
-      if (dist < 170) {
+      if (dist < (this.skill.range || (g.world.enclosed ? 170 : 240))) {
         const inView = d.dot(aim) / dist > cosF || dist < 7;
         if (inView && g.world.los(eye, _v2.copy(CHEST).applyQuaternion(e.quat).add(e.pos))) vis = true;
         // thruster plumes are bright: notice firing jets slightly outside the view cone
@@ -325,15 +326,16 @@ export class Bot {
   pickPatrolNode() {
     const s = this.s, w = this.game.world;
     const side = s.team === 0 ? 1 : -1; // direction towards the enemy base
+    const B = w.def.bounds, kx = B[0] / 72, ky = B[1] / 36;
     let x;
     const r = Math.random();
-    if (this.role === 'rusher') x = side * rand(5, 45);
-    else if (this.role === 'anchor') x = side * rand(-25, 20);
-    else x = side * rand(-10, 40);
-    const p = new THREE.Vector3(x, rand(-28, 28), rand(-28, 28));
-    if (r < 0.15) p.set(rand(-12, 12), rand(-20, 20), rand(-20, 20));
+    if (this.role === 'rusher') x = side * rand(5, 45) * kx;
+    else if (this.role === 'anchor') x = side * rand(-25, 20) * kx;
+    else x = side * rand(-10, 40) * kx;
+    const p = new THREE.Vector3(x, rand(-28, 28) * ky, rand(-28, 28) * ky);
+    if (r < 0.15) p.set(rand(-12, 12) * kx, rand(-20, 20) * ky, rand(-20, 20) * ky);
     let best = -1, bd = Infinity;
-    w.forNear(p, 12, (i) => { const nd = w.nav[i]; const d = nd.pos.distanceTo(p) - (nd.surf ? 6 : 0); if (d < bd) { bd = d; best = i; } });
+    w.forNear(p, 12 * Math.max(1, kx * 0.8), (i) => { const nd = w.nav[i]; const d = nd.pos.distanceTo(p) - (nd.surf ? 6 : 0); if (d < bd) { bd = d; best = i; } });
     return best >= 0 ? best : w.nearestNode(p, false);
   }
 
@@ -441,6 +443,11 @@ export class Bot {
         const into = -s.vel.dot(h.n);
         if (into > 1.5) vDes.addScaledVector(h.n, into * (1 - h.t / (sp * 2.2 + 1)) * 1.4);
       }
+    }
+    // open space: stay inside the combat area (predict 2.5 s ahead)
+    if (!w.enclosed) for (let i = 0; i < 3; i++) {
+      const lim = w.bounds.max[i] - 10, pv = s.pos.getComponent(i) + s.vel.getComponent(i) * 2.5;
+      if (Math.abs(pv) > lim) vDes.setComponent(i, vDes.getComponent(i) - Math.sign(pv) * Math.min(4, (Math.abs(pv) - lim) * 0.4 + 1));
     }
     // separation from teammates
     for (const o of g.soldiers) {
@@ -560,7 +567,7 @@ export class Bot {
     if (g.combat.fire(s)) {
       this.burst++;
       const def = s.weapon.def;
-      if (def.auto && dist > 25 && this.burst >= 3 + ((Math.random() * 3) | 0)) { this.burst = 0; this.burstPause = t + rand(0.15, 0.32); }
+      if (def.auto && (dist > 25 || this.skill.burstPause) && this.burst >= 3 + ((Math.random() * 3) | 0)) { this.burst = 0; this.burstPause = t + rand(0.15, 0.32) + (this.skill.burstPause || 0); }
     }
   }
 

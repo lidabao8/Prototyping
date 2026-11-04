@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, interceptTime, interceptTimeRocket, raySphere } from './math.js';
-import { GAS_MAX, MODES, TEAM_COLORS, TEAM_NAMES, TOWERS, CONE_YAW, CONE_PITCH, BODY_R } from './soldier.js';
+import { GAS_MAX, MODES, TEAM_COLORS, TEAM_NAMES, TOWERS, BODY_R, HIT_THRESH } from './soldier.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
 const css = (hex) => '#' + hex.toString(16).padStart(6, '0');
@@ -17,6 +17,7 @@ export class HUD {
     this.hitT = 0; this.hitHead = false; this.hitKill = false;
     this.dmgDirs = [];
     this.collWarnT = 0;
+    this.impactT = 0; this.impactSev = 0; this.cracks = [];
     this.font = "'Rajdhani','Bahnschrift','Segoe UI',Arial,sans-serif";
     this.resize();
   }
@@ -41,6 +42,41 @@ export class HUD {
   }
 
   hit(head, kill) { this.hitT = 0.22; this.hitHead = head; this.hitKill = kill; }
+
+  impact(severity) {
+    this.impactT = 1; this.impactSev = Math.min(1, severity);
+    if (severity > 0.25) {
+      // visor crack: a few jagged lines from a random point
+      const cx = this.W * (0.25 + Math.random() * 0.5), cy = this.H * (0.25 + Math.random() * 0.5);
+      const lines = [];
+      const n = 5 + Math.floor(severity * 6);
+      for (let i = 0; i < n; i++) {
+        let a = Math.random() * Math.PI * 2, x = cx, y = cy;
+        const pts = [[x, y]];
+        const len = 40 + Math.random() * 160 * severity;
+        for (let k = 0; k < 5; k++) { a += (Math.random() - 0.5) * 0.9; x += Math.cos(a) * len / 5; y += Math.sin(a) * len / 5; pts.push([x, y]); }
+        lines.push(pts);
+      }
+      this.cracks.push({ lines, t: 2.5 });
+      if (this.cracks.length > 3) this.cracks.shift();
+    }
+  }
+
+  drawImpact(dt) {
+    const g = this.g;
+    if (this.impactT > 0) {
+      this.impactT -= dt * 2.5;
+      g.fillStyle = `rgba(255,${Math.round(90 - 60 * this.impactSev)},40,${Math.max(0, this.impactT) * (0.15 + 0.35 * this.impactSev)})`;
+      g.fillRect(0, 0, this.W, this.H);
+    }
+    for (const c of this.cracks) {
+      c.t -= dt;
+      g.strokeStyle = `rgba(230,245,255,${Math.min(1, c.t / 1.2) * 0.75})`; g.lineWidth = 1.2;
+      for (const pts of c.lines) { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const [x, y] of pts.slice(1)) g.lineTo(x, y); g.stroke(); }
+    }
+    this.cracks = this.cracks.filter((c) => c.t > 0);
+    g.lineWidth = 1.5;
+  }
 
   damageFrom(pos) { if (pos) this.dmgDirs.push({ pos: pos.clone(), t: 1.2 }); }
 
@@ -79,7 +115,6 @@ export class HUD {
       if (game.showGrid || p.angVel.length() > 1.4) { /* grid drawn in 3D */ }
       this.drawMarkers();
       this.drawVelocityMarkers();
-      this.drawBodyMarker();
       this.drawCrosshair(cx, cy, dt);
       this.drawRates(cx, cy);
       this.drawTargetInfo(cx, cy);
@@ -89,6 +124,8 @@ export class HUD {
       this.drawWeapon();
       this.drawDamage(cx, cy, dt);
       this.drawHints(cx, cy);
+      this.drawBounds(cx, cy);
+      this.drawImpact(dt);
     } else {
       this.drawDeath(cx, cy);
     }
@@ -158,26 +195,24 @@ export class HUD {
         continue;
       }
       if (!game.world.los(eye, s.pos)) continue;
-      // enemy bracket
       const c = this.project(s.pos, {});
-      const sz = clamp(500 / dist, 8, 60);
-      g.strokeStyle = 'rgba(255,75,58,0.85)'; g.lineWidth = 1.5;
-      const b = (x, y, dx, dy) => { g.beginPath(); g.moveTo(x + dx * sz * 0.5, y); g.lineTo(x, y); g.lineTo(x, y + dy * sz * 0.5); g.stroke(); };
-      b(c.x - sz, c.y - sz, 1, 1); b(c.x + sz, c.y - sz, -1, 1); b(c.x - sz, c.y + sz, 1, -1); b(c.x + sz, c.y + sz, -1, -1);
-      // lead indicator: where to aim so that a round hits if the target does not accelerate
+      // lead indicator: where to aim so a round hits if the target does not accelerate.
+      // Drawn small and fades out when it nearly overlaps the target itself.
       const rel = _v.subVectors(s.pos, eye), vRel = _v2.subVectors(s.vel, p.vel);
       const t = def.kind === 'rocket' ? interceptTimeRocket(rel, vRel, def.speed, def.accel, def.burn) : interceptTime(rel, vRel, def.speed);
       if (t > 0 && vRel.length() > 0.15) {
         const lp = this.project(_v3.copy(s.pos).addScaledVector(vRel, t), {});
-        if (lp.on) {
-          g.strokeStyle = 'rgba(255,75,58,0.45)'; g.setLineDash([3, 4]);
-          g.beginPath(); g.moveTo(c.x, c.y); g.lineTo(lp.x, lp.y); g.stroke(); g.setLineDash([]);
-          g.strokeStyle = DANGER; g.lineWidth = 2;
-          g.beginPath(); g.moveTo(lp.x, lp.y - 7); g.lineTo(lp.x + 7, lp.y); g.lineTo(lp.x, lp.y + 7); g.lineTo(lp.x - 7, lp.y); g.closePath(); g.stroke();
+        const sep = Math.hypot(lp.x - c.x, lp.y - c.y);
+        const a = clamp((sep - 6) / 45, 0, 1) * 0.7;
+        if (lp.on && a > 0.04) {
+          g.strokeStyle = `rgba(255,110,90,${a})`; g.lineWidth = 1.2;
+          const r = 4;
+          g.beginPath(); g.moveTo(lp.x, lp.y - r); g.lineTo(lp.x + r, lp.y); g.lineTo(lp.x, lp.y + r); g.lineTo(lp.x - r, lp.y); g.closePath(); g.stroke();
           g.lineWidth = 1.5;
         }
       }
-      if (dist < 90) this.text(`${dist.toFixed(0)}m`, c.x + sz + 4, c.y - sz + 6, 11, 'rgba(255,120,100,0.9)');
+      const sz = clamp(500 / dist, 8, 60);
+      if (dist < 120) this.text(`${dist.toFixed(0)}m`, c.x + sz * 0.6 + 4, c.y - sz * 0.6, 10, 'rgba(255,120,100,0.75)');
     }
   }
 
@@ -207,29 +242,16 @@ export class HUD {
     g.lineWidth = 1.5;
   }
 
-  drawBodyMarker() {
-    const p = this.game.player, g = this.g;
-    const eye = p.eye(new THREE.Vector3());
-    const f = this.project(p.forward(_v).multiplyScalar(100).add(eye), {});
-    const atEdge = Math.abs(p.aimYaw) > CONE_YAW - 0.02 || Math.abs(p.aimPitch) > CONE_PITCH - 0.02;
-    if (f.on) {
-      g.strokeStyle = atEdge ? WARN : 'rgba(159,232,255,0.7)'; g.lineWidth = 1.5;
-      g.beginPath(); g.moveTo(f.x - 12, f.y + 4); g.lineTo(f.x - 12, f.y - 4); g.lineTo(f.x + 12, f.y - 4); g.lineTo(f.x + 12, f.y + 4); g.stroke();
-      g.beginPath(); g.moveTo(f.x, f.y - 4); g.lineTo(f.x, f.y + 6); g.stroke();
-    } else {
-      // off-screen: arrow at the edge pointing towards body heading
-      const pt = this.project(p.forward(_v).multiplyScalar(100).add(eye), {});
-      let dx = pt.x - this.W / 2, dy = pt.y - this.H / 2;
-      if (pt.behind) { dx = -dx; dy = -dy; }
-      const a = Math.atan2(dy, dx);
-      const r = Math.min(this.W, this.H) * 0.32;
-      const x = this.W / 2 + Math.cos(a) * r, y = this.H / 2 + Math.sin(a) * r;
-      g.fillStyle = WARN;
-      g.save(); g.translate(x, y); g.rotate(a);
-      g.beginPath(); g.moveTo(10, 0); g.lineTo(-6, -6); g.lineTo(-6, 6); g.fill(); g.restore();
-      this.text('BODY', x, y + 14, 10, WARN, 'center');
-    }
-    if (atEdge) this.text('NECK LIMIT – BODY TURNING', this.W / 2, this.H / 2 + 92, 11, WARN, 'center');
+  drawBounds(cx, cy) {
+    const game = this.game, p = game.player, w = game.world;
+    if (w.enclosed) return;
+    const out = w.outside(p.pos);
+    const near = Math.max(...[0, 1, 2].map((i) => Math.abs(p.pos.getComponent(i)) - w.bounds.max[i] + 15));
+    if (out > 0) {
+      const left = Math.max(0, 5 - p.oobT);
+      this.text('LEAVING COMBAT AREA', cx, cy - 150, 24, (game.time * 3) % 1 < 0.6 ? DANGER : WARN, 'center', 700);
+      this.text(left > 0 ? `Suit telemetry lost in ${left.toFixed(1)} s – turn back` : 'SUIT FAILING – RETURN TO THE COMBAT AREA', cx, cy - 126, 13, DANGER, 'center');
+    } else if (near > 0) this.text('approaching combat-area edge', cx, cy - 150, 12, WARN, 'center');
   }
 
   drawCrosshair(cx, cy, dt) {
@@ -323,11 +345,11 @@ export class HUD {
     if (into < 1.2) return;
     const tti = d / into;
     if (tti > 4) return;
-    const danger = into > 5.5;
+    const danger = into > HIT_THRESH;
     const blink = danger && (game.time * 4) % 1 < 0.5;
     const col = danger ? DANGER : WARN;
     if (!blink) this.text(`COLLISION ${tti.toFixed(1)} s`, cx, cy - 110, 22, col, 'center', 700);
-    this.text(danger ? `IMPACT ${into.toFixed(1)} m/s – BRAKE (SHIFT) OR GRAB` : `impact ${into.toFixed(1)} m/s`, cx, cy - 88, 12, col, 'center');
+    this.text(danger ? `IMPACT ${into.toFixed(1)} m/s – BRAKE (${game.keyLabel('brake')}) OR GRAB` : `impact ${into.toFixed(1)} m/s`, cx, cy - 88, 12, col, 'center');
     this.collWarnT -= dt;
     if (danger && this.collWarnT <= 0) { game.audio.play('warn'); this.collWarnT = 0.5; }
   }
@@ -344,7 +366,7 @@ export class HUD {
     g.fillStyle = 'rgba(8,12,16,0.55)'; g.fillRect(x - 8, y - 18, 250, 150);
     const dv = p.dv, frac = p.gas / GAS_MAX;
     this.text('Δv', x, y, 13, '#93a0ab');
-    this.text(`${dv.toFixed(1)} m/s`, x + 26, y, 22, frac < 0.2 ? DANGER : '#e9eef2', 'left', 700);
+    this.text(this.game.rules.infiniteGas ? '∞' : `${dv.toFixed(1)} m/s`, x + 26, y, 22, frac < 0.2 ? DANGER : '#e9eef2', 'left', 700);
     this.text(`N₂ ${p.gas.toFixed(2)} kg`, x + 150, y, 12, '#93a0ab');
     this.bar(x, y + 14, 230, 5, frac, frac < 0.2 ? DANGER : HUD_C);
     this.text('HP', x, y + 36, 13, '#93a0ab');
@@ -355,7 +377,7 @@ export class HUD {
     this.bar(x + 70, y + 55, 160, 5, p.o2 / 100, p.leaks.length ? WARN : '#8fb8ff');
     if (p.leaks.length) this.text(`SUIT BREACH ×${p.leaks.length} – VENTING`, x + 70, y + 68, 10, (this.game.time * 3) % 1 < 0.6 ? DANGER : WARN);
     this.text(`RCS: ${MODES[p.mode]}`, x, y + 88, 14, WARN, 'left', 700);
-    this.text('[T] cycle', x + 140, y + 88, 10, '#93a0ab');
+    this.text(`[${this.game.keyLabel('mode')}] cycle`, x + 140, y + 88, 10, '#93a0ab');
     const st = p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
     this.text(st, x, y + 108, 12, p.grab ? OK : HUD_C);
     const thr = p.throttle.reduce((a, b) => a + b, 0);
@@ -430,15 +452,15 @@ export class HUD {
     const game = this.game, p = game.player;
     if (p.grab) {
       const c = p.pushCharge;
-      this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : 'HOLD SPACE: PUSH OFF TOWARDS AIM   F: RELEASE', cx, cy + 120, 13, OK, 'center', 700);
-      if (p.grab.kind === 'pod' && !c) this.text(`WASD/C: HAUL POD (${(p.mass + p.grab.obj.mass).toFixed(0)} kg combined)`, cx, cy + 138, 11, OK, 'center');
+      this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : `HOLD ${game.keyLabel('up')}: PUSH OFF TOWARDS AIM   ${game.keyLabel('grab')}: RELEASE`, cx, cy + 120, 13, OK, 'center', 700);
+      if (p.grab.kind === 'pod' && !c) this.text(`MOVE KEYS: HAUL POD (${(p.mass + p.grab.obj.mass).toFixed(0)} kg combined)`, cx, cy + 138, 11, OK, 'center');
       if (c > 0) this.bar(cx - 80, cy + 132, 160, 4, c, OK);
     } else {
       const s = game.world.nearestSurface(p.pos, BODY_R + 0.85);
       if (s) {
         const ref = s.kind === 'pod' ? s.obj.vel : null;
         const rv = ref ? _v.subVectors(p.vel, ref).length() : p.vel.length();
-        this.text(rv > 4.5 ? `TOO FAST TO GRAB (${rv.toFixed(1)} m/s)` : '[F] GRAB', cx, cy + 120, 13, rv > 4.5 ? DANGER : OK, 'center', 700);
+        this.text(rv > 4.5 ? `TOO FAST TO GRAB (${rv.toFixed(1)} m/s)` : `[${game.keyLabel('grab')}] GRAB`, cx, cy + 120, 13, rv > 4.5 ? DANGER : OK, 'center', 700);
       }
     }
   }

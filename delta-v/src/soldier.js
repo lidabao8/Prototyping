@@ -17,15 +17,10 @@ export const VE = 700;           // m/s cold-gas exhaust velocity
 export const GAS_MAX = 10;       // kg of N2
 export const BASE_MASS = 112;    // kg (person + suit, without weapons or gas)
 export const BODY_R = 0.7;       // collision radius
-export const CONE_YAW = 60 * DEG;
-export const CONE_PITCH = 55 * DEG;
-export const MAX_RATE = 2.0;     // rad/s body pitch/yaw rate cap for assisted steering
 export const ROLL_RATE = 1.5;
-const STEER_K = 3.0;
 const RATE_K = 3.2;
 const TA = 0.42, TB = 0.5;       // thruster tower lateral/vertical offset (m)
-const DEADZONE = [10 * DEG, 4 * DEG, 17 * DEG, 17 * DEG];
-const HIT_THRESH = 5.5;          // m/s wall impact before damage
+export const HIT_THRESH = 8;     // m/s wall impact before damage
 
 // tower positions (body frame) and signs
 export const TOWERS = [
@@ -82,6 +77,35 @@ export function makeGunMesh(id, teamColor) {
     add(new THREE.TorusGeometry(0.062, 0.01, 6, 16), accent, 0, 0.01, -0.3);
   }
   return g;
+}
+
+// Inverted-hull outline: back faces pushed out along the vertex direction by a roughly constant pixel width.
+export const OUTLINE_MAT = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: { color: { value: new THREE.Color(0xff3b2f) }, thick: { value: 0.0032 } },
+  vertexShader: `uniform float thick;
+    void main(){
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vec3 dir = normalize(normalMatrix * normalize(position + vec3(1e-5)));
+      mv.xyz += dir * thick * max(1.5, -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: 'uniform vec3 color; void main(){ gl_FragColor = vec4(color, 1.0); }',
+});
+
+function addOutlines(root) {
+  const meshes = [];
+  root.traverse((o) => { if (o.isMesh && !o.userData.noOutline) meshes.push(o); });
+  const outlines = [];
+  for (const m of meshes) {
+    const o = new THREE.Mesh(m.geometry, OUTLINE_MAT);
+    o.position.copy(m.position); o.quaternion.copy(m.quaternion); o.scale.copy(m.scale);
+    o.visible = false;
+    o.userData.noOutline = true;
+    m.parent.add(o);
+    outlines.push(o);
+  }
+  return outlines;
 }
 
 function buildModel(team) {
@@ -151,11 +175,13 @@ function buildModel(team) {
       f.quaternion.setFromUnitVectors(up, exhaust.clone().negate());
       f.position.copy(t.pos).addScaledVector(exhaust, 0.07);
       f.visible = false;
+      f.userData.noOutline = true;
       root.add(f);
       flames.push(f);
     }
   }
-  return { root, upper, gunMount, flames, towerMeshes };
+  const outlines = addOutlines(root);
+  return { root, upper, gunMount, flames, towerMeshes, outlines };
 }
 
 // ---------------- Soldier ----------------
@@ -250,19 +276,21 @@ export class Soldier {
 
   forward(out) { return out.set(0, 0, -1).applyQuaternion(this.quat); }
 
-  /** Set aim from a world direction; offsets are clamped to the head cone. Returns true if clamped. */
+  /** Turn the body so it faces a world direction (shortest arc). The attitude-hold target turns with it. */
   setAimDir(d) {
-    _v2.copy(d).applyQuaternion(_q.copy(this.quat).invert());
-    let yaw = Math.atan2(-_v2.x, -_v2.z);
-    let pitch = Math.asin(clamp(_v2.y, -1, 1));
-    const cy = clamp(yaw, -CONE_YAW, CONE_YAW), cp = clamp(pitch, -CONE_PITCH, CONE_PITCH);
-    this.aimYaw = cy; this.aimPitch = cp;
-    return cy !== yaw || cp !== pitch;
+    const f = this.forward(_v2);
+    _q.setFromUnitVectors(f, _v.copy(d).normalize());
+    this.quat.premultiply(_q).normalize();
+    if (this.holdQ) this.holdQ.premultiply(_q).normalize();
   }
 
+  /** Mouse look: yaw about the body's own up axis, pitch about its right axis (no world "up" in orbit). */
   addAim(dYaw, dPitch) {
-    this.aimYaw = clamp(this.aimYaw + dYaw, -CONE_YAW, CONE_YAW);
-    this.aimPitch = clamp(this.aimPitch + dPitch, -CONE_PITCH, CONE_PITCH);
+    _q.setFromAxisAngle(_AY, dYaw);
+    _q2.setFromAxisAngle(_AX, dPitch);
+    _q.multiply(_q2);
+    this.quat.multiply(_q).normalize();
+    if (this.holdQ) this.holdQ.multiply(_q).normalize();
   }
 
   spawn(pos, facing) {
@@ -274,7 +302,8 @@ export class Soldier {
   }
 
   /** Impulse J (world, N·s) applied at world point p. */
-  applyImpulse(J, p) {
+  applyImpulse(J, p, unintended = true) {
+    if (unintended === 'recoil' ? !this.game.rules.recoil : unintended && !this.game.rules.knockback) return;
     if (this.grab && this.grab.kind !== 'pod') {
       // anchored: a strong hit can knock you off the handhold
       if (J.length() > 120) this.grab = null; else return;
@@ -292,23 +321,19 @@ export class Soldier {
   // ---------- Flight computer + thruster allocation ----------
   flightComputer(dt) {
     const c = this.ctrl, mode = this.mode;
-    const dz = this.isBot ? 12 * DEG : DEADZONE[mode];
-    const ax = this.aimPitch, ay = this.aimYaw;
-    const mag = Math.hypot(ax, ay);
-    let ex = 0, ey = 0;
-    if (mag > dz) { const s = (mag - dz) / mag; ex = ax * s; ey = ay * s; }
     const rollIn = c.roll;
     const cmdR = _cmdR.set(0, 0, 0);
     const w = this.angVel;
     const manual = mode === 0 && !this.isBot;
-    if (manual) {
-      cmdR.set(clamp(ex / 0.35, -1, 1), clamp(ey / 0.35, -1, 1), rollIn);
+    const kill = c.killRot;
+    if (manual && !kill) {
+      // Newtonian: roll keys fire roll jets directly; any spin stays until you counter it (X)
+      cmdR.set(0, 0, rollIn);
+      this.holdQ = null;
     } else {
-      const wDes = _wDes.set(clamp(ex * STEER_K, -MAX_RATE, MAX_RATE), clamp(ey * STEER_K, -MAX_RATE, MAX_RATE), rollIn * ROLL_RATE);
-      if (c.killRot) wDes.set(0, 0, 0);
-      const steering = !c.killRot && (ex !== 0 || ey !== 0 || rollIn !== 0);
-      const holdMode = (mode >= 2 || this.isBot) && !c.killRot;
-      if (holdMode && !steering) {
+      const wDes = _wDes.set(0, 0, kill ? 0 : rollIn * ROLL_RATE);
+      const holdMode = (mode >= 2 || this.isBot) && !kill && rollIn === 0;
+      if (holdMode) {
         if (!this.holdQ && w.lengthSq() < 0.02) this.holdQ = this.quat.clone();
         if (this.holdQ) {
           // error rotation in body frame
@@ -316,14 +341,15 @@ export class Soldier {
           if (_q.w < 0) { _q.x = -_q.x; _q.y = -_q.y; _q.z = -_q.z; _q.w = -_q.w; }
           const s = Math.sqrt(1 - Math.min(1, _q.w * _q.w));
           const ang = 2 * Math.acos(clamp(_q.w, -1, 1));
-          if (s > 1e-5) wDes.set(_q.x / s, _q.y / s, _q.z / s).multiplyScalar(Math.min(1.2, ang * 2.5));
+          if (s > 1e-5) wDes.set(_q.x / s, _q.y / s, _q.z / s).multiplyScalar(Math.min(1.2, ang * 4));
         }
       } else this.holdQ = null;
       const err = _v.subVectors(wDes, w);
+      const db = this.isBot ? 0.02 : 0.004;
       cmdR.set(
-        Math.abs(err.x) < 0.03 ? 0 : clamp(err.x * RATE_K, -1, 1),
-        Math.abs(err.y) < 0.03 ? 0 : clamp(err.y * RATE_K, -1, 1),
-        Math.abs(err.z) < 0.03 ? 0 : clamp(err.z * RATE_K, -1, 1),
+        Math.abs(err.x) < db ? 0 : clamp(err.x * RATE_K, -1, 1),
+        Math.abs(err.y) < db ? 0 : clamp(err.y * RATE_K, -1, 1),
+        Math.abs(err.z) < db ? 0 : clamp(err.z * RATE_K, -1, 1),
       );
     }
     // translation
@@ -362,6 +388,7 @@ export class Soldier {
     if (sum <= 0) return sum;
     let need = sum * NOZZLE_F / VE * dt;
     let scale = 1;
+    if (this.game.rules.infiniteGas) need = 0;
     if (need > this.gas) { scale = this.gas / need; need = this.gas; }
     this.gas -= need;
     if (scale < 1) for (let k = 0; k < 24; k++) th[k] *= scale;
@@ -379,12 +406,11 @@ export class Soldier {
   // ---------- Physics step ----------
   step(dt) {
     const world = this.game.world;
-    const aim = this.aimDir(_aim);
     const I = this.inertia(_I);
     const m = this.mass;
 
     if (this.alive && this.grab) {
-      this.stepGrabbed(dt, aim);
+      this.stepGrabbed(dt);
       return;
     }
     let F = null, T = null;
@@ -396,7 +422,7 @@ export class Soldier {
     const Fw = _Fw.set(0, 0, 0), Tb = _Tb.set(0, 0, 0);
     if (F && this.throttle.some((x) => x > 0)) { Fw.copy(F).applyQuaternion(this.quat); Tb.copy(T); }
     // suit leaks: gas escapes along leak normal, pushing the body the other way
-    for (const lk of this.leaks) {
+    if (this.game.rules.breaches) for (const lk of this.leaks) {
       const f = _v.copy(lk.n).multiplyScalar(-28);
       Tb.add(_v2.crossVectors(lk.p, f));
       Fw.add(f.applyQuaternion(this.quat));
@@ -424,11 +450,9 @@ export class Soldier {
     q.normalize();
     // collisions
     this.collide(dt, world);
-    // keep aim world-stable (neck counter-rotates) within the cone
-    if (this.alive) this.setAimDir(aim);
   }
 
-  stepGrabbed(dt, aim) {
+  stepGrabbed(dt) {
     const g = this.grab;
     this.throttle.fill(0);
     _F.set(0, 0, 0);
@@ -448,18 +472,14 @@ export class Soldier {
     } else {
       this.vel.set(0, 0, 0);
     }
-    // hand-over-hand: body slowly turns to face the aim for free
-    const ex = this.aimPitch, ey = this.aimYaw;
-    const mag = Math.hypot(ex, ey);
+    // anchored: hands stop any spin; roll keys twist you around the handhold for free
     const wDes = _wDes.set(0, 0, this.ctrl.roll * 1.0);
-    if (mag > 8 * DEG) { const s = Math.min(1.4, (mag - 8 * DEG) * 2.5) / mag; wDes.x = ex * s; wDes.y = ey * s; }
     this.angVel.lerp(wDes, Math.min(1, dt * 8));
     const w = this.angVel, wl = w.length();
     if (wl > 1e-6) {
       _q.setFromAxisAngle(_v.copy(w).divideScalar(wl), wl * dt);
       this.quat.multiply(_q).normalize();
     }
-    this.setAimDir(aim);
   }
 
   collide(dt, world) {
@@ -475,12 +495,19 @@ export class Soldier {
         const vt = _v.copy(self.vel).addScaledVector(n, -self.vel.dot(n));
         self.vel.addScaledVector(vt, -0.18);
         const I = self.inertia(_I);
+        if (!self.game.rules.knockback) vt.set(0, 0, 0);
         const tau = _v2.crossVectors(n, vt).multiplyScalar(-self.mass * 0.18 * BODY_R).applyQuaternion(_q.copy(self.quat).invert());
         self.angVel.x += tau.x / I.x; self.angVel.y += tau.y / I.y; self.angVel.z += tau.z / I.z;
         if (speed > 1.2 && self.impactCool <= 0) {
           self.impactCool = 0.25;
-          self.game.onImpact(self, speed);
-          if (speed > HIT_THRESH && self.alive) self.game.damage(self, (speed - HIT_THRESH) * 14, null, 'impact', self.pos.clone().addScaledVector(n, -BODY_R));
+          const cp = self.pos.clone().addScaledVector(n, -BODY_R);
+          self.game.onImpact(self, speed, cp, n.clone());
+          if (speed > HIT_THRESH && self.alive) {
+            self.game.damage(self, (speed - HIT_THRESH) * 16, null, 'impact', cp);
+            if (self.game.rules.breaches && speed > HIT_THRESH + 2 && self.leaks.length < 3) {
+              self.leaks.push({ p: _v.copy(n).negate().multiplyScalar(0.3).applyQuaternion(_q.copy(self.quat).invert()).clone(), n: n.clone().negate().applyQuaternion(_q.copy(self.quat).invert()), t: 4 });
+            }
+          }
         }
       }
     });
@@ -509,8 +536,11 @@ export class Soldier {
       }
     }
     // fuel regeneration (suit compressor) after a short idle
-    if (t - this.lastThrustT > 1.2) this.gas = Math.min(GAS_MAX, this.gas + dt * (this.grab ? 1.0 : 0.45));
+    // suit compressor refills the tank quickly once the jets go quiet
+    if (this.game.rules.infiniteGas) this.gas = GAS_MAX;
+    else if (t - this.lastThrustT > 0.6) this.gas = Math.min(GAS_MAX, this.gas + dt * (this.grab ? 2.2 : 1.1));
     // leaks
+    if (!this.game.rules.breaches) this.leaks.length = 0;
     for (const lk of this.leaks) lk.t -= dt;
     this.leaks = this.leaks.filter((l) => l.t > 0);
     if (this.leaks.length) this.o2 = Math.max(0, this.o2 - this.leaks.length * 3 * dt);
@@ -539,8 +569,10 @@ export class Soldier {
     const m = this.model;
     m.root.position.copy(this.pos);
     m.root.quaternion.copy(this.quat);
-    m.upper.rotation.set(this.aimPitch * 0.9, this.aimYaw * 0.9, 0, 'YXZ');
     for (const k in this.gunMeshes) this.gunMeshes[k].visible = this.alive && k === this.weapon.def.id;
+    const pl = this.game.player;
+    const outline = this.alive && !!pl && pl !== this && pl.team !== this.team && this.game.settings.outlines;
+    if (outline !== this._outlined) { this._outlined = outline; for (const o of m.outlines) o.visible = outline; }
     for (let i = 0; i < 24; i++) {
       const t = this.throttle[i];
       const f = m.flames[i];
@@ -552,4 +584,5 @@ export class Soldier {
 
 const _cmdR = new THREE.Vector3(), _cmdT = new THREE.Vector3(), _wDes = new THREE.Vector3(), _zero = new THREE.Vector3();
 const _F = new THREE.Vector3(), _T = new THREE.Vector3(), _f = new THREE.Vector3(), _Fw = new THREE.Vector3(), _Tb = new THREE.Vector3();
-const _aim = new THREE.Vector3(), _I = new THREE.Vector3();
+const _I = new THREE.Vector3(), _q2 = new THREE.Quaternion();
+const _AX = new THREE.Vector3(1, 0, 0), _AY = new THREE.Vector3(0, 1, 0);

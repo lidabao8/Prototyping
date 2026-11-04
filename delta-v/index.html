@@ -43,8 +43,21 @@
   tr.me td { color:var(--accent); font-weight:700; }
   tr.dead td { opacity:0.5; }
   #endBoard { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0; }
+  h3 { margin:14px 0 4px; font-size:12px; letter-spacing:0.22em; color:var(--hud); font-weight:700; }
+  .toggles { display:grid; grid-template-columns:1fr 1fr; gap:6px 16px; }
+  .toggles label { flex-direction:row; align-items:flex-start; gap:8px; font-size:13px; letter-spacing:0.04em; text-transform:none; color:var(--text); }
+  .toggles input { margin-top:3px; }
+  .toggles small { display:block; color:var(--dim); font-size:11px; letter-spacing:0.02em; }
+  details { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  summary { cursor:pointer; font-weight:700; letter-spacing:0.16em; font-size:13px; color:var(--text); }
+  #binds { display:grid; grid-template-columns:1fr 1fr; gap:4px 18px; margin-top:10px; }
+  .bind { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; color:var(--dim); }
+  button.key { background:#0d131b; color:var(--text); border:1px solid var(--line); padding:3px 8px; font-size:13px; letter-spacing:0.04em; min-width:84px; font-weight:600; }
+  button.key.wait { border-color:var(--accent); color:var(--accent); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .bindnote { grid-column:1/-1; font-size:12px; color:var(--dim); margin-top:6px; }
   #lockhint { position:fixed; left:50%; top:60%; transform:translateX(-50%); display:none; background:var(--panel); padding:10px 18px; border:1px solid var(--line); cursor:pointer; }
-  @media (max-width:640px) { .grid { grid-template-columns:1fr; } .keys { grid-template-columns:auto 1fr; } }
+  @media (max-width:640px) { .grid, .toggles, #binds { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -57,9 +70,13 @@
     <h1>DELTA<span>-V</span></h1>
     <div class="sub">Zero-G Team Deathmatch · keyboard &amp; mouse</div>
     <div style="font-size:14px;color:var(--dim);line-height:1.4">No up. No free momentum. Every burn, shot and leak changes your trajectory. Fly a 24-nozzle RCS suit, push off walls, lead your shots and outfly the opposing squad.</div>
+    <h3>MATCH</h3>
     <div class="grid">
+      <label>Map
+        <select id="optMap"><option value="hangar">Hangar Bay (enclosed)</option><option value="yard">Derelict Yard (open space)</option></select>
+      </label>
       <label>Bot difficulty
-        <select id="optDiff"><option value="normal">Normal</option><option value="hard">Hard</option><option value="elite">Elite</option></select>
+        <select id="optDiff"><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option><option value="elite">Elite</option></select>
       </label>
       <label>Team size
         <select id="optTeam"><option value="3">3 v 3</option><option value="4">4 v 4</option><option value="5">5 v 5</option><option value="6">6 v 6</option></select>
@@ -67,6 +84,7 @@
       <label>Score limit
         <select id="optScore"><option value="15">15 kills</option><option value="30">30 kills</option><option value="50">50 kills</option></select>
       </label>
+      <label style="grid-column:1/-1;font-size:13px;letter-spacing:0;text-transform:none;color:var(--hud)" id="mapDesc"></label>
       <label>RCS assist mode
         <select id="optMode"><option value="0">Manual / Newtonian</option><option value="1">Rate damping</option><option value="2">Attitude hold</option><option value="3">Velocity match</option></select>
       </label>
@@ -82,21 +100,21 @@
       <label style="flex-direction:row;align-items:center;gap:8px;margin-top:16px"><input type="checkbox" id="optInv"> Invert Y</label>
     </div>
     <div class="desc" id="modeDesc"></div>
-    <button id="btnDeploy">DEPLOY</button>
-    <div class="keys">
-      <b>Mouse</b><span>Aim head/gun in a ±60° neck cone; look past it and the RCS turns your body</span>
-      <b>W / S · A / D</b><span>Translate forward/back · left/right (body frame)</span>
-      <b>Space / C</b><span>Translate up / down</span>
-      <b>Q / E</b><span>Roll left / right</span>
-      <b>Shift</b><span>Match velocity (brake to station or locked target)</span>
-      <b>X</b><span>Kill rotation</span>
-      <b>F</b><span>Grab surface/pod; anchored: hold Space to push off</span>
-      <b>LMB / RMB</b><span>Fire / zoom</span>
-      <b>1 2 3 · Wheel</b><span>Rifle · Flechette · Gyrojet</span>
-      <b>R · G · V</b><span>Reload · Grenade · Momentum hammer</span>
-      <b>T · L · H</b><span>Cycle RCS mode · Lock velocity reference · Reference grid</span>
-      <b>Tab · Esc</b><span>Scoreboard · Pause</span>
+    <h3>PHYSICS</h3>
+    <div class="toggles">
+      <label><input type="checkbox" id="rule_recoil"><span>Recoil thrust<small>shots push and spin you</small></span></label>
+      <label><input type="checkbox" id="rule_breaches"><span>Suit breaches<small>venting leaks push you, drain O₂</small></span></label>
+      <label><input type="checkbox" id="rule_knockback"><span>Hit &amp; blast knockback<small>bullets, blasts, hammer, wall spin</small></span></label>
+      <label><input type="checkbox" id="rule_thrusterDamage"><span>Thruster damage<small>lost quads cause coupled spin</small></span></label>
+      <label><input type="checkbox" id="rule_infiniteGas"><span>Infinite gas</span></label>
+      <label><input type="checkbox" id="optOutline"><span>Outline enemies</span></label>
     </div>
+    <div class="row"><button id="btnDeploy">DEPLOY</button></div>
+    <details>
+      <summary>CONTROLS &amp; KEYBINDS</summary>
+      <div id="binds"></div>
+      <div class="row"><button class="alt" id="btnResetBinds" type="button" style="font-size:13px;padding:6px 14px">RESET TO DEFAULTS</button></div>
+    </details>
   </div>
 </div>
 

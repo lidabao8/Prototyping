@@ -64,7 +64,7 @@ export class Combat {
     }
     // recoil: momentum of the ejecta pushes you back, applied at the muzzle (off the centre of mass -> spin)
     const momentum = def.ejecta != null ? def.ejecta : def.projMass * def.speed;
-    s.applyImpulse(_v.copy(aim).multiplyScalar(-momentum), muzzle);
+    s.applyImpulse(_v.copy(aim).multiplyScalar(-momentum), muzzle, 'recoil');
     s.kick.x += def.kick * (0.7 + Math.random() * 0.6);
     s.kick.y += def.kick * (Math.random() - 0.5) * 0.8;
     s.addAim(def.kick * (Math.random() - 0.5) * 0.5, def.kick * (0.6 + Math.random() * 0.5));
@@ -80,7 +80,7 @@ export class Combat {
     const aim = s.aimDir(new THREE.Vector3());
     const pos = s.eye(new THREE.Vector3()).addScaledVector(aim, 0.6);
     const vel = s.vel.clone().addScaledVector(aim, GRENADE.speed);
-    s.applyImpulse(_v.copy(aim).multiplyScalar(-GRENADE.mass * GRENADE.speed), pos);
+    s.applyImpulse(_v.copy(aim).multiplyScalar(-GRENADE.mass * GRENADE.speed), pos, 'recoil');
     const mesh = new THREE.Mesh(this.gGeo, this.gMat[s.team]);
     mesh.position.copy(pos);
     this.game.scene.add(mesh);
@@ -109,8 +109,8 @@ export class Combat {
       const hitPt = best.pos.clone().add(randomPerp(aim, _v).multiplyScalar(0.4));
       best.applyImpulse(J, hitPt);
       // momentum hammer: induced tumble
-      best.angVel.add(_v2.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(MELEE.spin));
-      s.applyImpulse(J.clone().multiplyScalar(-0.5), eye);
+      if (g.rules.knockback) best.angVel.add(_v2.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(MELEE.spin));
+      s.applyImpulse(J.clone().multiplyScalar(-0.5), eye, 'recoil');
       if (best.team !== s.team) g.damage(best, MELEE.dmg, s, 'hammer', hitPt, 'body');
       g.fx.sparks(hitPt, 14, aim.clone().negate(), 5);
       return true;
@@ -119,8 +119,8 @@ export class Combat {
     const h = g.world.raycast(eye, aim, MELEE.range);
     if (h) {
       const J = aim.clone().multiplyScalar(MELEE.impulse * 0.6);
-      if (h.kind === 'pod') { h.obj.vel.addScaledVector(J, 1 / h.obj.mass); s.applyImpulse(J.negate().multiplyScalar(0.5), eye); }
-      else s.applyImpulse(J.negate(), eye);
+      if (h.kind === 'pod') { h.obj.vel.addScaledVector(J, 1 / h.obj.mass); s.applyImpulse(J.negate().multiplyScalar(0.5), eye, 'recoil'); }
+      else s.applyImpulse(J.negate(), eye, 'recoil');
       g.fx.sparks(eye.clone().addScaledVector(aim, h.t), 10, h.n, 4);
       g.audio.play('clank');
     }
@@ -217,7 +217,7 @@ export class Combat {
         if (part.part === 'pack' && tower < 0) tower = Math.floor(Math.random() * 4);
         if (tower >= 0) g.damageTower(s, tower, dmg * (part.part === 'pack' ? 0.6 : 0.9));
         // suit breach -> venting gas leak
-        if (part.part !== 'leg' && Math.random() < 0.35 && s.leaks.length < 3) s.leaks.push({ p: bodyP.clone(), n: outN.clone(), t: 4 + Math.random() * 3 });
+        if (g.rules.breaches && part.part !== 'leg' && Math.random() < 0.35 && s.leaks.length < 3) s.leaks.push({ p: bodyP.clone(), n: outN.clone(), t: 4 + Math.random() * 3 });
         g.damage(s, dmg, p.owner, def.id, hp, part.part);
       }
       g.fx.suitHit(hp, dir.clone().negate(), s.vel);
@@ -253,7 +253,7 @@ export class Combat {
       if (s.team === owner.team && s !== owner) continue;
       g.damage(s, dmg * f * (s === owner ? 0.6 : 1), owner, cause, hitPt, 'body');
       if (Math.random() < f) g.damageTower(s, Math.floor(Math.random() * 4), 25 * f);
-      if (Math.random() < 0.5 * f && s.leaks.length < 3) {
+      if (g.rules.breaches && Math.random() < 0.5 * f && s.leaks.length < 3) {
         s.leaks.push({ p: new THREE.Vector3(rand(-0.2, 0.2), rand(-0.1, 0.4), rand(-0.15, 0.3)), n: new THREE.Vector3().randomDirection(), t: 5 });
       }
     }

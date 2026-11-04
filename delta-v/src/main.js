@@ -1,17 +1,36 @@
 import * as THREE from 'three';
-import { World } from './world.js';
+import { World, MAPS } from './world.js';
 import { Effects } from './effects.js';
 import { Audio } from './audio.js';
 import { Combat } from './combat.js';
 import { HUD } from './hud.js';
 import { Bot } from './bot.js';
-import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR } from './soldier.js';
+import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR, HIT_THRESH } from './soldier.js';
 import { WEAPONS } from './weapons.js';
 import { clamp, rand, raySphere } from './math.js';
 
 const STEP = 1 / 120;
 const CALLSIGNS = ['VEGA', 'KESTREL', 'NOMAD', 'APEX', 'ORBIT', 'HALO', 'RAZOR', 'TALON', 'DRIFT', 'NOVA', 'SPECTER', 'CINDER', 'ECHO', 'PULSAR', 'QUASAR', 'ZENITH'];
-const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false };
+export const ACTIONS = [
+  ['forward', 'Move forward', 'KeyW'], ['back', 'Move back', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
+  ['up', 'Move up / push off', 'Space'], ['down', 'Move down', 'ShiftLeft'], ['rollLeft', 'Roll left', 'KeyQ'], ['rollRight', 'Roll right', 'KeyE'],
+  ['brake', 'Match velocity (brake)', 'KeyC'], ['killRot', 'Kill rotation', 'KeyX'], ['grab', 'Grab / release', 'KeyF'],
+  ['reload', 'Reload', 'KeyR'], ['grenade', 'Grenade', 'KeyG'], ['melee', 'Momentum hammer', 'KeyV'],
+  ['weapon1', 'Rifle', 'Digit1'], ['weapon2', 'Flechette', 'Digit2'], ['weapon3', 'Gyrojet', 'Digit3'],
+  ['mode', 'Cycle RCS mode', 'KeyT'], ['lockRef', 'Lock velocity reference', 'KeyL'], ['grid', 'Reference grid', 'KeyH'], ['board', 'Scoreboard', 'Tab'],
+];
+const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
+const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false };
+const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar' };
+
+export function keyName(code) {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num' + code.slice(6);
+  const map = { Space: 'Space', ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift', ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'L-Alt', AltRight: 'R-Alt', Tab: 'Tab', CapsLock: 'Caps', Backquote: '`', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: 'Enter', Backspace: 'Bksp' };
+  return map[code] || code;
+}
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion();
 
 class Input {
@@ -21,7 +40,8 @@ class Input {
     this.mouse = { dx: 0, dy: 0, left: false, right: false, leftPressed: false, wheel: 0 };
     this.el = el;
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
+      if (this.capture) { e.preventDefault(); const cb = this.capture; this.capture = null; cb(e.code); return; }
+      if (e.code === 'Tab' || e.code === 'Space' || (e.code.startsWith('Arrow') && !(e.target && e.target.tagName === 'SELECT'))) e.preventDefault();
       if (!this.keys.has(e.code)) this.pressed.add(e.code);
       this.keys.add(e.code);
     });
@@ -58,7 +78,7 @@ class Game {
     this.settings = this.loadSettings();
     this.time = 0;
     this.state = 'menu';
-    this.world = new World(this.scene);
+    this.world = new World(this.scene, this.settings.map);
     this.fx = new Effects(this.scene);
     this.audio = new Audio();
     this.audio.setVolume(this.settings.volume);
@@ -83,8 +103,19 @@ class Game {
   }
 
   loadSettings() {
-    try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('deltav.settings') || '{}') }; } catch (e) { return { ...DEFAULTS }; }
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('deltav.settings') || '{}') || {}; } catch (e) { saved = {}; }
+    const st = { ...DEFAULTS, ...saved };
+    st.binds = { ...DEFAULT_BINDS, ...(saved.binds || {}) };
+    st.rules = { ...DEFAULT_RULES, ...(saved.rules || {}) };
+    if (!MAPS[st.map]) st.map = 'hangar';
+    return st;
   }
+
+  get rules() { return this.settings.rules; }
+  keyLabel(action) { return keyName(this.settings.binds[action]); }
+  bound(action) { return this.input.down(this.settings.binds[action]); }
+  pressedAct(action) { return this.input.hit(this.settings.binds[action]); }
   saveSettings() { try { localStorage.setItem('deltav.settings', JSON.stringify(this.settings)); } catch (e) { /* ignore */ } }
 
   resize() {
@@ -119,8 +150,9 @@ class Game {
   }
 
   buildGrid() {
+    if (this.grid) this.scene.remove(this.grid);
     const pts = [];
-    const b = this.world.bounds, s = 12;
+    const b = this.world.bounds, s = this.world.enclosed ? 12 : 24;
     for (let y = b.min[1]; y <= b.max[1]; y += s) for (let z = b.min[2]; z <= b.max[2]; z += s) pts.push(b.min[0], y, z, b.max[0], y, z);
     for (let x = b.min[0]; x <= b.max[0]; x += s) for (let z = b.min[2]; z <= b.max[2]; z += s) pts.push(x, b.min[1], z, x, b.max[1], z);
     for (let x = b.min[0]; x <= b.max[0]; x += s) for (let y = b.min[1]; y <= b.max[1]; y += s) pts.push(x, y, b.min[2], x, y, b.max[2]);
@@ -145,6 +177,13 @@ class Game {
     sel('optTeam', 'teamSize', Number);
     sel('optScore', 'scoreLimit', Number);
     sel('optMode', 'mode', Number);
+    sel('optMap', 'map');
+    $('mapDesc').textContent = MAPS[st.map].desc;
+    $('optMap').addEventListener('change', () => { $('mapDesc').textContent = MAPS[st.map].desc; });
+    const chk = (id, get, set) => { const el = $(id); if (!el) return; el.checked = get(); el.addEventListener('change', () => { set(el.checked); this.saveSettings(); }); };
+    for (const k of Object.keys(DEFAULT_RULES)) chk('rule_' + k, () => st.rules[k], (v) => { st.rules[k] = v; });
+    chk('optOutline', () => st.outlines, (v) => { st.outlines = v; });
+    this.buildBindUI();
     const rng = (id, key, out, fmt) => {
       const el = $(id); if (!el) return;
       el.value = st[key];
@@ -165,6 +204,38 @@ class Game {
     $('btnMenu').addEventListener('click', () => this.toMenu());
     this.ui.lock.addEventListener('click', () => this.lock());
     this.canvas.addEventListener('click', () => { if (this.state === 'playing' && document.pointerLockElement !== this.canvas) this.lock(); });
+  }
+
+  buildBindUI() {
+    const box = document.getElementById('binds');
+    if (!box) return;
+    const st = this.settings;
+    box.innerHTML = '';
+    for (const [id, label] of ACTIONS) {
+      const row = document.createElement('div'); row.className = 'bind';
+      const l = document.createElement('span'); l.textContent = label;
+      const b = document.createElement('button'); b.className = 'key'; b.type = 'button'; b.id = 'bind_' + id;
+      b.textContent = keyName(st.binds[id]);
+      b.addEventListener('click', () => {
+        b.textContent = 'press a key…'; b.classList.add('wait');
+        this.input.capture = (code) => {
+          b.classList.remove('wait');
+          if (code !== 'Escape') {
+            // a key can only do one thing: swap with whatever used it before
+            for (const k of Object.keys(st.binds)) if (st.binds[k] === code && k !== id) st.binds[k] = st.binds[id];
+            st.binds[id] = code;
+            this.saveSettings();
+          }
+          this.buildBindUI();
+        };
+      });
+      row.append(l, b); box.append(row);
+    }
+    const fixed = document.createElement('div'); fixed.className = 'bindnote';
+    fixed.textContent = 'Fixed: mouse = turn your body, left click = fire, right click = zoom, wheel = cycle weapons, Esc = pause.';
+    box.append(fixed);
+    const reset = document.getElementById('btnResetBinds');
+    if (reset && !reset._wired) { reset._wired = true; reset.addEventListener('click', () => { st.binds = { ...DEFAULT_BINDS }; this.saveSettings(); this.buildBindUI(); }); }
   }
 
   applySettings() {
@@ -217,6 +288,11 @@ class Game {
   newMatch() {
     this.clearMatch();
     const st = this.settings;
+    if (this.world.mapId !== st.map) {
+      this.world.dispose();
+      this.world = new World(this.scene, st.map);
+      this.buildGrid();
+    }
     this.applySettings();
     this.teamScore = [0, 0];
     this.scoreLimit = st.scoreLimit;
@@ -258,6 +334,7 @@ class Game {
     }
     const facing = new THREE.Vector3(s.team === 0 ? 1 : -1, 0, 0);
     s.spawn(best, facing);
+    s.oobT = 0;
     s.mode = s.isPlayer ? this.settings.mode : 2;
     s.killedBy = null;
     if (s.bot) s.bot.onSpawn();
@@ -284,12 +361,23 @@ class Game {
 
   onExplosion(pos, owner) { for (const b of this.bots) b.hear(owner, pos, 80); }
 
-  onImpact(s, speed) {
+  onImpact(s, speed, point, n) {
     this.audio.play(speed > 5 ? 'impact' : 'clank', s.isPlayer ? 0 : this.distToListener(s.pos));
-    if (s.isPlayer && speed > 3) this.hud.message(`IMPACT ${speed.toFixed(1)} m/s`, speed > 5.5 ? '#ff4b3a' : '#ffcc4d', 1.2);
+    const hard = speed > HIT_THRESH;
+    if (point && speed > 3) {
+      this.fx.sparks(point, Math.round(4 + speed * (hard ? 4 : 1.5)), n, 2 + speed * 0.6);
+      if (hard) { this.fx.suitHit(point, n, s.vel); this.fx.alpha.spawn(point, null, new THREE.Color(0x8a9099), 0.6, 1.2, { grow: 3, alpha: 0.4 }); }
+    }
+    if (s.isPlayer) {
+      if (speed > 3) this.hud.message(`IMPACT ${speed.toFixed(1)} m/s`, hard ? '#ff4b3a' : '#ffcc4d', 1.2);
+      const sev = hard ? 0.4 + (speed - HIT_THRESH) * 0.12 : (speed - 1.2) * 0.04;
+      this.shake = Math.max(this.shake || 0, Math.min(1, sev));
+      if (hard) this.hud.impact(sev);
+    }
   }
 
   damageTower(s, i, dmg) {
+    if (!this.rules.thrusterDamage) return;
     const t = s.towers[i];
     if (t.dead || !s.alive) return;
     t.hp -= dmg;
@@ -414,41 +502,42 @@ class Game {
     if (inp.hit('Escape')) { this.pause(); return; }
     if (!p.alive) { c.move.set(0, 0, 0); return; }
     const sens = 0.0022 * this.settings.sens * (inp.mouse.right ? 0.5 : 1);
+    // mouse turns the body directly
     p.addAim(-inp.mouse.dx * sens, (this.settings.invertY ? 1 : -1) * inp.mouse.dy * sens);
-    const k = (code) => (inp.down(code) ? 1 : 0);
-    c.move.set(k('KeyD') - k('KeyA'), (p.grab ? 0 : k('Space')) - k('KeyC') - k('ControlLeft'), k('KeyS') - k('KeyW'));
-    c.roll = k('KeyQ') - k('KeyE');
-    c.killRot = inp.down('KeyX');
-    c.brake = inp.down('ShiftLeft') || inp.down('ShiftRight');
-    if (inp.hit('KeyT')) {
+    const k = (a) => (this.bound(a) ? 1 : 0);
+    c.move.set(k('right') - k('left'), (p.grab ? 0 : k('up')) - k('down'), k('back') - k('forward'));
+    c.roll = k('rollLeft') - k('rollRight');
+    c.killRot = this.bound('killRot');
+    c.brake = this.bound('brake');
+    if (this.pressedAct('mode')) {
       p.mode = (p.mode + 1) % MODES.length; this.settings.mode = p.mode; this.saveSettings();
       this.hud.message(`RCS MODE: ${MODES[p.mode]}`, '#ffcc4d', 2.5);
       this.hud.message(MODE_DESC[p.mode], '#9fe8ff', 3);
       this.audio.play('mode');
     }
-    if (inp.hit('KeyH')) { this.showGrid = !this.showGrid; this.hud.message(this.showGrid ? 'REFERENCE GRID ON' : 'REFERENCE GRID AUTO', '#9fe8ff', 1.5); }
-    if (inp.hit('KeyL')) {
+    if (this.pressedAct('grid')) { this.showGrid = !this.showGrid; this.hud.message(this.showGrid ? 'REFERENCE GRID ON' : 'REFERENCE GRID AUTO', '#9fe8ff', 1.5); }
+    if (this.pressedAct('lockRef')) {
       const info = this.hud.aimInfo;
       if (info && (info.soldier || info.kind === 'pod') && info.obj !== p.refTarget) { p.refTarget = info.obj; this.hud.message(`VELOCITY REFERENCE: ${info.soldier ? info.soldier.name : 'CARGO POD'}`, '#ffcc4d', 2); }
       else { p.refTarget = null; this.hud.message('VELOCITY REFERENCE: STATION', '#ffcc4d', 2); }
     }
     if (p.refTarget && p.refTarget.alive === false) p.refTarget = null;
     // grab / push-off
-    if (inp.hit('KeyF')) { if (p.grab) this.releaseGrab(p); else this.tryGrab(p); }
+    if (this.pressedAct('grab')) { if (p.grab) this.releaseGrab(p); else this.tryGrab(p); }
     if (p.grab) {
-      if (inp.down('Space')) p.pushCharge = Math.min(1, p.pushCharge + dt / 0.6);
+      if (this.bound('up')) p.pushCharge = Math.min(1, p.pushCharge + dt / 0.6);
       else if (p.pushCharge > 0) { this.pushOff(p, p.aimDir(new THREE.Vector3()), 2 + 5 * p.pushCharge); p.pushCharge = 0; }
     } else p.pushCharge = 0;
     // weapons
-    for (let i = 0; i < 3; i++) if (inp.hit('Digit' + (i + 1))) p.switchTo(i);
+    for (let i = 0; i < 3; i++) if (this.pressedAct('weapon' + (i + 1))) p.switchTo(i);
     if (inp.mouse.wheel) p.switchTo((p.cur + (inp.mouse.wheel > 0 ? 1 : 2)) % 3);
-    if (inp.hit('KeyR')) { if (p.startReload()) this.audio.play('reload'); }
-    if (inp.hit('KeyG')) this.combat.throwGrenade(p);
-    if (inp.hit('KeyV')) this.combat.melee(p);
+    if (this.pressedAct('reload')) { if (p.startReload()) this.audio.play('reload'); }
+    if (this.pressedAct('grenade')) this.combat.throwGrenade(p);
+    if (this.pressedAct('melee')) this.combat.melee(p);
     const def = p.weapon.def;
     if (def.auto ? inp.mouse.left : inp.mouse.leftPressed) this.combat.fire(p);
-    if (inp.hit('Tab')) this.ui.board.style.display = 'flex';
-    if (!inp.down('Tab')) this.ui.board.style.display = 'none';
+    if (this.pressedAct('board')) this.ui.board.style.display = 'flex';
+    if (!this.bound('board')) this.ui.board.style.display = 'none';
     else this.ui.board.innerHTML = this.boardHTML();
   }
 
@@ -521,6 +610,11 @@ class Game {
       while (this.acc >= STEP && n < 8) { this.substep(STEP); this.acc -= STEP; n++; }
       if (n === 8) this.acc = 0;
       for (const s of this.soldiers) {
+        if (s.alive && !this.world.enclosed) {
+          // open map: 5 s outside the combat area, then the suit starts failing
+          if (this.world.outside(s.pos) > 0) { s.oobT = (s.oobT || 0) + dt; if (s.oobT > 5) this.damage(s, 20 * dt, null, 'out of bounds'); }
+          else s.oobT = 0;
+        }
         if (s.alive) s.update(dt);
         else {
           s.respawnT -= dt;
@@ -572,16 +666,23 @@ class Game {
     const cam = this.camera, p = this.player;
     if (this.state === 'menu' || !p) {
       this.menuCam += dt * 0.05;
-      const r = 46;
-      cam.position.set(Math.cos(this.menuCam) * r, Math.sin(this.menuCam * 0.7) * 10, Math.sin(this.menuCam) * 26);
+      const k = this.world.enclosed ? 1 : 2.4;
+      const r = 46 * k;
+      cam.position.set(Math.cos(this.menuCam) * r, Math.sin(this.menuCam * 0.7) * 10 * k, Math.sin(this.menuCam) * 26 * k);
       cam.lookAt(0, 0, 0);
       this.vm.visible = false;
       this.grid.visible = false;
       return;
     }
     p.eye(cam.position);
+    this.shake = (this.shake || 0) * Math.exp(-dt * 5);
     if (p.alive) {
       p.aimQuat(cam.quaternion);
+      if (this.shake > 0.01) {
+        const a = this.shake * 0.06;
+        cam.position.add(_v.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(this.shake * 0.08));
+        cam.quaternion.multiply(_q.setFromEuler(new THREE.Euler(rand(-a, a), rand(-a, a), rand(-a, a) * 2)));
+      }
       cam.fov += ((this.input.mouse.right ? this.settings.fov * 0.55 : this.settings.fov) - cam.fov) * Math.min(1, dt * 14);
       cam.updateProjectionMatrix();
     } else {
