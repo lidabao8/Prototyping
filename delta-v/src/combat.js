@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { raySphere, randomPerp, rand } from './math.js';
-import { HITBOXES, TOWERS } from './soldier.js';
+import { HITBOXES, TOWERS, THROW_TIME } from './soldier.js';
 import { GRENADE, MELEE } from './weapons.js';
 import { COLORS } from './effects.js';
 
@@ -23,6 +23,13 @@ export class Combat {
 
   color(hex) { return this.colors[hex] || (this.colors[hex] = new THREE.Color(hex)); }
 
+  /** Current cone half-angle: loose from the hip, tight down the sights, steadier when anchored. */
+  spreadOf(s, def) {
+    const hip = def.hipSpread != null ? def.hipSpread : def.spread * 2.5;
+    const ads = def.adsSpread != null ? def.adsSpread : def.spread * 0.4;
+    return (hip + (ads - hip) * (s.adsAmt || 0)) * (s.grab ? 0.7 : 1);
+  }
+
   muzzlePoint(s, out) {
     return out.set(0.18, -0.14, -0.85).applyQuaternion(s.aimQuat(_q)).add(s.eye(_v3));
   }
@@ -30,7 +37,7 @@ export class Combat {
   /** Attempt to fire the current weapon. Returns true when a shot went off. */
   fire(s) {
     const w = s.weapon, def = w.def, g = this.game;
-    if (!s.alive || s.switchT > 0 || w.cool > 0) return false;
+    if (!s.alive || s.switchT > 0 || w.cool > 0 || s.throwT > 0) return false;
     if (def.kind === 'beam') return this.fireBeam(s, w, def);
     if (w.reloadT > 0) {
       if (def.perShell && w.mag > 0) { w.reloadT = 0; } else return false;
@@ -50,7 +57,7 @@ export class Combat {
     const n = def.kind === 'pellets' ? def.pellets : 1;
     for (let i = 0; i < n; i++) {
       const d = aim.clone();
-      const sp = def.spread * (s.grab ? 0.6 : 1) * Math.sqrt(Math.random());
+      const sp = this.spreadOf(s, def) * Math.sqrt(Math.random());
       if (sp > 0) d.addScaledVector(randomPerp(aim, _v), Math.tan(sp)).normalize();
       const p = {
         pos: eye.clone().addScaledVector(d, 0.35), vel: s.vel.clone().addScaledVector(d, def.speed),
@@ -104,7 +111,7 @@ export class Combat {
     s.lastFireT = g.time;
     const eye = s.eye(new THREE.Vector3());
     const d = s.aimDir(new THREE.Vector3());
-    if (def.spread) d.addScaledVector(randomPerp(d, _v), Math.tan(def.spread * Math.sqrt(Math.random()))).normalize();
+    d.addScaledVector(randomPerp(d, _v), Math.tan(this.spreadOf(s, def) * Math.sqrt(Math.random()))).normalize();
     const h = g.world.raycast(eye, d, def.range);
     let end = h ? h.t : def.range;
     const hit = this.raySoldier(eye, d, end, s);
@@ -148,10 +155,21 @@ export class Combat {
     }
   }
 
-  throwGrenade(s) {
-    if (!s.alive || s.grenades <= 0 || s.grenadeCool > 0) return false;
-    s.grenades--; s.grenadeCool = 1.0;
-    const aim = s.aimDir(new THREE.Vector3());
+  /** Start the throw animation; the grenade leaves the hand partway through (releaseGrenade). */
+  throwGrenade(s, dir = null) {
+    if (!s.alive || s.grenades <= 0 || s.grenadeCool > 0 || s.throwT > 0) return false;
+    s.grenadeCool = s.isBot ? 6 : 1.0;
+    s.throwT = THROW_TIME;
+    s.throwDir = dir ? dir.clone().normalize() : null;
+    if (s.weapon.reloadT > 0) s.weapon.reloadT = 0;
+    s.spawnProtect = 0;
+    return true;
+  }
+
+  releaseGrenade(s) {
+    if (!s.alive || s.grenades <= 0) return false;
+    s.grenades--;
+    const aim = s.throwDir || s.aimDir(new THREE.Vector3());
     const pos = s.eye(new THREE.Vector3()).addScaledVector(aim, 0.6);
     const vel = s.vel.clone().addScaledVector(aim, GRENADE.speed);
     s.applyImpulse(_v.copy(aim).multiplyScalar(-GRENADE.mass * GRENADE.speed), pos, 'recoil');
@@ -159,14 +177,15 @@ export class Combat {
     mesh.position.copy(pos);
     this.game.scene.add(mesh);
     this.grenades.push({ pos, vel, owner: s, fuse: GRENADE.fuse, mesh, spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)) });
-    this.game.audio.play('throw');
-    s.spawnProtect = 0;
+    this.game.audio.play('throw', s.isPlayer ? 0 : this.game.distToListener(pos));
+    this.game.onThrow(s, pos);
     return true;
   }
 
   melee(s) {
-    if (!s.alive || s.meleeCool > 0) return false;
+    if (!s.alive || s.meleeCool > 0 || s.throwT > 0) return false;
     s.meleeCool = MELEE.cooldown;
+    s.meleeT = 0.35;
     s.spawnProtect = 0;
     const g = this.game;
     const eye = s.eye(new THREE.Vector3()), aim = s.aimDir(new THREE.Vector3());

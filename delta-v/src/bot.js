@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { clamp, rand, DEG, interceptTime, interceptTimeRocket, randomPerp } from './math.js';
-import { GAS_MAX, NOZZLE_F } from './soldier.js';
+import { GAS_MAX, NOZZLE_F, THROW_TIME } from './soldier.js';
 import { GRENADE, MELEE } from './weapons.js';
 
 export const SKILLS = {
-  easy: { reaction: 0.65, err0: 11, settle: 0.85, floor: 2.2, track: 130, velNoise: 0.45, velLag: 0.8, fov: 55, head: 0, jink: 0.3, grenade: 0.015, dodge: 0.05, range: 110, burstPause: 0.6 },
-  normal: { reaction: 0.4, err0: 7, settle: 0.55, floor: 1.2, track: 220, velNoise: 0.25, velLag: 0.45, fov: 65, head: 0.03, jink: 0.6, grenade: 0.05, dodge: 0.3 },
+  easy: { reaction: 0.65, err0: 11, settle: 0.85, floor: 2.2, track: 130, velNoise: 0.45, velLag: 0.8, fov: 55, head: 0, jink: 0.3, grenade: 0.03, dodge: 0.05, range: 110, burstPause: 0.6 },
+  normal: { reaction: 0.4, err0: 7, settle: 0.55, floor: 1.2, track: 220, velNoise: 0.25, velLag: 0.45, fov: 65, head: 0.03, jink: 0.6, grenade: 0.06, dodge: 0.3 },
   hard: { reaction: 0.25, err0: 4.5, settle: 0.34, floor: 0.6, track: 360, velNoise: 0.12, velLag: 0.3, fov: 78, head: 0.15, jink: 1.0, grenade: 0.1, dodge: 0.65 },
   elite: { reaction: 0.17, err0: 3, settle: 0.24, floor: 0.33, track: 520, velNoise: 0.06, velLag: 0.18, fov: 85, head: 0.35, jink: 1.2, grenade: 0.14, dodge: 0.9 },
 };
@@ -174,6 +174,7 @@ export class Bot {
     if (prev !== this.state) { this.goal = null; this.path = null; this.coast = false; }
     // weapon management
     this.manageWeapons(tgt);
+    if (tgt) this.considerGrenade(tgt);
     // goal planning
     if (!this.goal || t > this.goalT) this.planGoal();
     this.hitsRecent *= 0.8;
@@ -367,6 +368,8 @@ export class Bot {
       this.target = null;
     }
     this._dt = dt;
+    // aim down sights once settled on a target at range
+    s.ads = !!this.target && t > this.acquireT && this.target.pos.distanceTo(s.pos) > 10;
     this.steer(dt);
     this.aim(dt);
     this.roll(dt);
@@ -587,19 +590,6 @@ export class Bot {
     const aim = s.aimDir(_v);
     const angErr = Math.acos(clamp(aim.dot(this.trueAim), -1, 1));
     const tol = Math.atan(0.42 / dist) * 1.35 + 0.15 * DEG + (s.weapon.def.kind === 'pellets' ? 2.5 * DEG : 0);
-    // grenades at slow / anchored targets at mid range
-    if (s.grenades > 0 && s.grenadeCool <= 0 && dist > 9 && dist < 30 && _v2.subVectors(tgt.vel, s.vel).length() < 2.5 && Math.random() < this.skill.grenade * dt * 3) {
-      const rel = _v2.subVectors(tgt.pos, eye), vRel = _v3.subVectors(tgt.vel, s.vel);
-      const tt = interceptTime(rel, vRel, GRENADE.speed);
-      if (tt > 0 && tt < GRENADE.fuse - 0.4) {
-        const d = rel.addScaledVector(vRel, tt).normalize();
-        const saved = s.aimDir(new THREE.Vector3());
-        s.setAimDir(d);
-        g.combat.throwGrenade(s);
-        s.setAimDir(saved);
-        return;
-      }
-    }
     if (angErr > tol || s.weapon.reloadT > 0 || s.switchT > 0) return;
     const wsb = s.weapon;
     if (wsb.def.kind === 'beam') {
@@ -621,6 +611,34 @@ export class Bot {
     }
   }
 
+  /** Grenade decisions: anchored or slow targets, enemies bunched together, or a bot that's losing the duel. */
+  considerGrenade(tgt) {
+    const s = this.s, g = this.game;
+    if (s.grenades <= 0 || s.grenadeCool > 0 || s.throwT > 0 || this.game.time < this.acquireT) return;
+    const eye = this.eye;
+    const dist = tgt.pos.distanceTo(eye);
+    if (dist < 8 || dist > 55) return;
+    const vRel = _v3.subVectors(tgt.vel, s.vel);
+    const slow = tgt.grab || vRel.length() < 2;
+    let score = dist < 30 ? 1 : 0.4;
+    if (slow) score += 1.2;
+    else if (dist > 30) return; // long lobs only at targets that can't dodge
+    for (const o of g.soldiers) {
+      if (!o.alive || o === tgt) continue;
+      const d = o.pos.distanceTo(tgt.pos);
+      if (o.team !== s.team && d < 7) score += 0.8;
+      if (o.team === s.team && d < 9) return; // never into teammates
+    }
+    if (s.health < 50) score += 0.4;
+    if (Math.random() > this.skill.grenade * 2.2 * score) return;
+    const rel = _v2.subVectors(tgt.pos, eye);
+    const tt = interceptTime(rel, vRel, GRENADE.speed);
+    if (!(tt > 0) || tt > GRENADE.fuse - 0.35) return;
+    const dir = rel.addScaledVector(vRel, tt + THROW_TIME * 0.4).normalize();
+    if (g.world.raycast(eye, dir, Math.min(dist, 6), true)) return; // would bounce straight back
+    g.combat.throwGrenade(s, dir);
+  }
+
   // enemy just ducked behind cover: lob a grenade at the spot to flush them out
   flushGrenade() {
     const s = this.s, g = this.game, k = this.huntK;
@@ -631,10 +649,7 @@ export class Bot {
     if (d < 10 || d > 28 || !g.world.los(eye, k.pos, true)) return;
     for (const o of g.soldiers) if (o.alive && o.team === s.team && o.pos.distanceTo(k.pos) < 10) return;
     const dir = _v.subVectors(k.pos, eye).normalize();
-    const saved = s.aimDir(new THREE.Vector3());
-    s.setAimDir(dir);
-    g.combat.throwGrenade(s);
-    s.setAimDir(saved);
+    g.combat.throwGrenade(s, dir);
   }
 
   lineClearOfFriends(eye, aim, dist) {

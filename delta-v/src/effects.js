@@ -35,6 +35,7 @@ class ParticleSet {
     this.drag = new Float32Array(max);
     this.a0 = new Float32Array(max);
     this.n = 0;
+    this.density = 1;
     const g = new THREE.BufferGeometry();
     this.aPos = new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage);
     this.aCol = new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage);
@@ -55,6 +56,7 @@ class ParticleSet {
   }
 
   spawn(p, v, color, size, life, opts = {}) {
+    if (this.density < 1 && size < 0.3 && Math.random() > this.density) return;
     let i = this.n;
     if (i >= this.max) i = Math.floor(Math.random() * this.max); else this.n++;
     this.pos[i * 3] = p.x; this.pos[i * 3 + 1] = p.y; this.pos[i * 3 + 2] = p.z;
@@ -131,6 +133,9 @@ export class Effects {
     this.decalIdx = 0;
     this._v = new THREE.Vector3(); this._v2 = new THREE.Vector3();
   }
+
+  set density(v) { this._d = v; if (this.add) { this.add.density = v; this.alpha.density = v; } }
+  get density() { return this._d; }
 
   setScale(h, fov) { const s = h / (2 * Math.tan(fov * Math.PI / 360)); this.add.mat.uniforms.scale.value = s; this.alpha.mat.uniforms.scale.value = s; }
 

@@ -41,7 +41,39 @@ export class HUD {
     if (this.feed.length > 6) this.feed.pop();
   }
 
-  hit(head, kill) { this.hitT = 0.22; this.hitHead = head; this.hitKill = kill; }
+  hit(head, kill) { this.hitT = kill ? 0.5 : 0.28; this.hitDur = this.hitT; this.hitHead = head; this.hitKill = kill; }
+
+  /** Floating damage numbers; rapid hits on the same target stack into one number. */
+  damageNumber(target, point, amount, head, kill) {
+    this.nums = this.nums || [];
+    const t = this.game.time;
+    let n = this.nums.find((x) => x.target === target && t - x.born < 0.5 && !x.kill);
+    if (!n) { n = { target, pos: point.clone(), amount: 0, born: t, life: 1.1, jitter: (Math.random() - 0.5) * 30 }; this.nums.push(n); }
+    n.amount += amount; n.head = n.head || head; n.kill = kill; n.life = 1.1; n.pos.copy(point); n.pop = 1;
+    if (this.nums.length > 12) this.nums.shift();
+  }
+
+  drawNumbers(dt) {
+    if (!this.nums || !this.nums.length) return;
+    const g = this.g;
+    for (const n of this.nums) {
+      n.life -= dt; n.pop = Math.max(0, (n.pop || 0) - dt * 5);
+      const pt = this.project(n.pos, {});
+      if (!pt.on) continue;
+      const age = 1.1 - n.life;
+      const a = clamp(n.life / 0.4, 0, 1);
+      g.globalAlpha = a;
+      const size = (n.kill ? 22 : n.head ? 19 : 15) * (1 + n.pop * 0.35);
+      const col = n.kill ? DANGER : n.head ? WARN : '#ffffff';
+      g.font = `700 ${size}px ${this.font}`; g.textAlign = 'center';
+      g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.6)';
+      const x = pt.x + n.jitter, y = pt.y - 26 - age * 34;
+      const txt = Math.round(n.amount) + (n.kill ? ' ✕' : '');
+      g.strokeText(txt, x, y); g.fillStyle = col; g.fillText(txt, x, y);
+    }
+    g.globalAlpha = 1; g.lineWidth = 1.5;
+    this.nums = this.nums.filter((n) => n.life > 0);
+  }
 
   impact(severity) {
     this.impactT = 1; this.impactSev = Math.min(1, severity);
@@ -116,6 +148,7 @@ export class HUD {
       this.drawMarkers();
       this.drawVelocityMarkers();
       this.drawCrosshair(cx, cy, dt);
+      this.drawNumbers(dt);
       this.drawRates(cx, cy);
       this.drawTargetInfo(cx, cy);
       this.drawCollision(cx, cy, dt);
@@ -258,24 +291,33 @@ export class HUD {
     const g = this.g, p = this.game.player;
     const enemy = this.aimInfo && this.aimInfo.soldier && this.aimInfo.soldier.team !== p.team;
     const col = enemy ? DANGER : '#e9f6ff';
-    const sp = p.weapon.def.spread;
+    const sp = this.game.combat.spreadOf(p, p.weapon.def);
     const gap = 4 + Math.tan(sp) * this.H / (2 * Math.tan(this.game.camera.fov * Math.PI / 360)) + Math.abs(p.kick.x) * 400;
-    g.strokeStyle = col; g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(cx - gap - 8, cy); g.lineTo(cx - gap, cy);
-    g.moveTo(cx + gap, cy); g.lineTo(cx + gap + 8, cy);
-    g.moveTo(cx, cy + gap); g.lineTo(cx, cy + gap + 8);
-    g.moveTo(cx, cy - gap); g.lineTo(cx, cy - gap - 8);
-    g.stroke();
-    g.fillStyle = col; g.fillRect(cx - 1, cy - 1, 2, 2);
+    const vis = 1 - clamp((p.adsAmt - 0.35) / 0.3, 0, 1); // the sight's own reticle takes over when aiming
+    if (vis > 0.02) {
+      g.globalAlpha = vis;
+      g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 4;
+      const lines = () => { g.beginPath(); g.moveTo(cx - gap - 8, cy); g.lineTo(cx - gap, cy); g.moveTo(cx + gap, cy); g.lineTo(cx + gap + 8, cy); g.moveTo(cx, cy + gap); g.lineTo(cx, cy + gap + 8); g.moveTo(cx, cy - gap); g.lineTo(cx, cy - gap - 8); g.stroke(); };
+      lines();
+      g.strokeStyle = col; g.lineWidth = 2; lines();
+      g.fillStyle = col; g.fillRect(cx - 1, cy - 1, 2, 2);
+      g.globalAlpha = 1;
+    }
     if (this.hitT > 0) {
+      // hitmarker: pops out and fades; yellow for headshots, red ring for kills
       this.hitT -= dt;
-      g.strokeStyle = this.hitKill ? DANGER : this.hitHead ? WARN : '#ffffff'; g.lineWidth = this.hitKill ? 3 : 2;
-      const a = 6, b = 13;
-      g.beginPath();
-      g.moveTo(cx - a, cy - a); g.lineTo(cx - b, cy - b); g.moveTo(cx + a, cy - a); g.lineTo(cx + b, cy - b);
-      g.moveTo(cx - a, cy + a); g.lineTo(cx - b, cy + b); g.moveTo(cx + a, cy + a); g.lineTo(cx + b, cy + b);
-      g.stroke();
+      const k = this.hitT / this.hitDur;
+      const pop = 1 + (1 - k) * 0.5;
+      const col2 = this.hitKill ? DANGER : this.hitHead ? WARN : '#ffffff';
+      const a = 5 * pop, b = (this.hitKill ? 17 : 12) * pop;
+      g.globalAlpha = clamp(k * 1.6, 0, 1);
+      g.lineCap = 'round';
+      g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = this.hitKill ? 6 : 5;
+      const x = () => { g.beginPath(); g.moveTo(cx - a, cy - a); g.lineTo(cx - b, cy - b); g.moveTo(cx + a, cy - a); g.lineTo(cx + b, cy - b); g.moveTo(cx - a, cy + a); g.lineTo(cx - b, cy + b); g.moveTo(cx + a, cy + a); g.lineTo(cx + b, cy + b); g.stroke(); };
+      x();
+      g.strokeStyle = col2; g.lineWidth = this.hitKill ? 3.5 : 2.5; x();
+      if (this.hitKill) { g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, b + 6, 0, Math.PI * 2); g.stroke(); }
+      g.globalAlpha = 1; g.lineCap = 'butt';
     }
     g.lineWidth = 1.5;
   }

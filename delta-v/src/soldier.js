@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, DEG } from './math.js';
 import { WEAPONS, WeaponState, GRENADE } from './weapons.js';
+import { buildGun, buildSoldier } from './models.js';
 
 export const TEAM_COLORS = [0x3f8cff, 0xff8a2a];
 export const TEAM_NAMES = ['BLUE', 'ORANGE'];
@@ -20,6 +21,7 @@ export const BODY_R = 0.7;       // collision radius
 export const ROLL_RATE = 1.5;
 const RATE_K = 3.2;
 const TA = 0.42, TB = 0.5;       // thruster tower lateral/vertical offset (m)
+export const THROW_TIME = 0.6;  // s, grenade throw animation (released 40% in)
 export const HIT_THRESH = 8;     // m/s wall impact before damage
 export const CRAWL_SPEED = 2.2;  // m/s hand-over-hand along a surface
 
@@ -48,48 +50,17 @@ export const HITBOXES = [
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
 
 // ---------------- Model ----------------
-const sharedGeo = {};
-function geo(key, fn) { return sharedGeo[key] || (sharedGeo[key] = fn()); }
-
-export function makeGunMesh(id, teamColor) {
-  const g = new THREE.Group();
-  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.5, metalness: 0.6 });
-  const light = new THREE.MeshStandardMaterial({ color: 0x8b9298, roughness: 0.5, metalness: 0.5 });
-  const accent = new THREE.MeshBasicMaterial({ color: teamColor });
-  const add = (geom, mat, x, y, z) => { const m = new THREE.Mesh(geom, mat); m.position.set(x, y, z); g.add(m); return m; };
-  if (id === 'rifle') {
-    add(new THREE.BoxGeometry(0.07, 0.09, 0.6), dark, 0, 0, -0.1);
-    add(new THREE.BoxGeometry(0.05, 0.05, 0.3), light, 0, 0.015, -0.52);
-    add(new THREE.BoxGeometry(0.05, 0.14, 0.07), dark, 0, -0.1, -0.08);
-    add(new THREE.BoxGeometry(0.06, 0.07, 0.2), dark, 0, -0.02, 0.26);
-    add(new THREE.BoxGeometry(0.04, 0.05, 0.12), light, 0, 0.075, -0.05);
-    add(new THREE.BoxGeometry(0.075, 0.012, 0.3), accent, 0, 0.05, -0.2);
-  } else if (id === 'shotgun') {
-    add(new THREE.BoxGeometry(0.1, 0.11, 0.5), dark, 0, 0, -0.05);
-    add(new THREE.CylinderGeometry(0.035, 0.035, 0.4, 8).rotateX(Math.PI / 2), light, 0, 0.02, -0.48);
-    add(new THREE.CylinderGeometry(0.03, 0.03, 0.34, 8).rotateX(Math.PI / 2), dark, 0, -0.045, -0.4);
-    add(new THREE.BoxGeometry(0.06, 0.15, 0.08), dark, 0, -0.11, 0.02);
-    add(new THREE.BoxGeometry(0.105, 0.015, 0.25), accent, 0, 0.06, -0.1);
-  } else if (id === 'recoilless') {
-    add(new THREE.CylinderGeometry(0.075, 0.075, 0.95, 10).rotateX(Math.PI / 2), light, 0, 0.03, -0.2);
-    add(new THREE.CylinderGeometry(0.1, 0.075, 0.18, 10).rotateX(Math.PI / 2), dark, 0, 0.03, 0.33);
-    add(new THREE.BoxGeometry(0.06, 0.15, 0.08), dark, 0, -0.1, -0.05);
-    add(new THREE.BoxGeometry(0.05, 0.08, 0.16), dark, -0.09, 0.08, -0.2);
-    add(new THREE.TorusGeometry(0.078, 0.012, 6, 16), accent, 0, 0.03, -0.55);
-  } else if (id === 'maser') {
-    add(new THREE.BoxGeometry(0.09, 0.1, 0.5), light, 0, 0, -0.08);
-    add(new THREE.CylinderGeometry(0.03, 0.045, 0.25, 8).rotateX(Math.PI / 2), dark, 0, 0.01, -0.45);
-    add(new THREE.BoxGeometry(0.11, 0.06, 0.2), dark, 0, 0.07, 0.0);
-    add(new THREE.BoxGeometry(0.05, 0.15, 0.07), dark, 0, -0.11, -0.04);
-    const coil = add(new THREE.BoxGeometry(0.095, 0.02, 0.3), new THREE.MeshBasicMaterial({ color: 0x9ff0ff }), 0, -0.04, -0.12);
-    coil.userData.noOutline = true;
-  } else {
-    add(new THREE.CylinderGeometry(0.06, 0.06, 0.55, 10).rotateX(Math.PI / 2), light, 0, 0.01, -0.15);
-    add(new THREE.CylinderGeometry(0.075, 0.06, 0.12, 10).rotateX(Math.PI / 2), dark, 0, 0.01, -0.45);
-    add(new THREE.BoxGeometry(0.06, 0.15, 0.08), dark, 0, -0.1, -0.02);
-    add(new THREE.BoxGeometry(0.03, 0.06, 0.1), dark, 0, 0.085, -0.1);
-    add(new THREE.TorusGeometry(0.062, 0.01, 6, 16), accent, 0, 0.01, -0.3);
-  }
+const gunCache = new Map();
+/** Guns are built once per (weapon, team) and cloned: clones share geometry and materials. */
+export function makeGunMesh(id, teamColor, opts = {}) {
+  const key = id + ':' + teamColor + ':' + !!opts.noShadow;
+  let proto = gunCache.get(key);
+  if (!proto) { proto = buildGun(id, teamColor, opts); proto.userData.magIndex = proto.children.indexOf(proto.userData.mag); gunCache.set(key, proto); }
+  const ud = proto.userData;
+  proto.userData = {};
+  const g = proto.clone(true);
+  proto.userData = ud;
+  g.userData = { ...ud, sight: ud.sight.clone(), hand: ud.hand.clone(), grip: ud.grip.clone(), magRest: ud.magRest.clone(), mag: g.children[ud.magIndex] };
   return g;
 }
 
@@ -100,7 +71,7 @@ export const OUTLINE_MAT = new THREE.ShaderMaterial({
   vertexShader: `uniform float thick;
     void main(){
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      vec3 dir = normalize(normalMatrix * normalize(position + vec3(1e-5)));
+      vec3 dir = normalize(normalMatrix * normal);
       mv.xyz += dir * thick * max(1.5, -mv.z);
       gl_Position = projectionMatrix * mv;
     }`,
@@ -123,71 +94,19 @@ function addOutlines(root) {
 }
 
 function buildModel(team) {
-  const tc = TEAM_COLORS[team];
-  const root = new THREE.Group();
-  const suit = new THREE.MeshStandardMaterial({ color: 0xd8dade, roughness: 0.75, metalness: 0.05, flatShading: true });
-  const grey = new THREE.MeshStandardMaterial({ color: 0x575e66, roughness: 0.7, metalness: 0.3, flatShading: true });
-  const teamMat = new THREE.MeshStandardMaterial({ color: tc, roughness: 0.6, emissive: tc, emissiveIntensity: 0.35, flatShading: true });
-  const glow = new THREE.MeshBasicMaterial({ color: tc });
-  const visor = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.1, metalness: 1, emissive: tc, emissiveIntensity: 0.25 });
-  const mesh = (g, m, x, y, z) => { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); return o; };
-
-  const torso = mesh(geo('torso', () => new THREE.BoxGeometry(0.5, 0.62, 0.34)), suit, 0, 0.15, 0);
-  root.add(torso);
-  root.add(mesh(geo('belt', () => new THREE.BoxGeometry(0.52, 0.1, 0.36)), teamMat, 0, -0.12, 0));
-  root.add(mesh(geo('pack', () => new THREE.BoxGeometry(0.56, 0.72, 0.26)), grey, 0, 0.12, 0.3));
-  root.add(mesh(geo('packStripe', () => new THREE.BoxGeometry(0.57, 0.06, 0.27)), glow, 0, 0.38, 0.3));
-  // thruster towers & arms
-  const towerGeo = geo('tower', () => new THREE.BoxGeometry(0.12, 0.12, 0.14));
-  const strut = geo('strut', () => new THREE.BoxGeometry(0.16, 0.05, 0.05));
-  const towerMeshes = [];
-  for (const t of TOWERS) {
-    const tm = mesh(towerGeo, grey, t.pos.x, t.pos.y, t.pos.z);
-    root.add(tm); towerMeshes.push(tm);
-    root.add(mesh(strut, grey, t.pos.x * 0.8, t.pos.y, 0.15));
-    root.add(mesh(geo('tlight', () => new THREE.BoxGeometry(0.13, 0.03, 0.03)), glow, t.pos.x, t.pos.y + 0.075, -0.05));
-  }
-  // hips & legs (relaxed EVA crouch)
-  const thigh = geo('thigh', () => new THREE.CylinderGeometry(0.1, 0.09, 0.42, 7));
-  const shin = geo('shin', () => new THREE.CylinderGeometry(0.085, 0.08, 0.4, 7));
-  const boot = geo('boot', () => new THREE.BoxGeometry(0.15, 0.12, 0.26));
-  for (const s of [-1, 1]) {
-    const th = mesh(thigh, suit, s * 0.14, -0.42, -0.08); th.rotation.x = 0.5; root.add(th);
-    const sh = mesh(shin, suit, s * 0.14, -0.78, -0.02); sh.rotation.x = -0.35; root.add(sh);
-    root.add(mesh(boot, grey, s * 0.14, -1.0, 0.06));
-    root.add(mesh(geo('knee', () => new THREE.BoxGeometry(0.16, 0.06, 0.14)), teamMat, s * 0.14, -0.6, -0.17));
-  }
-  // upper group: head + arms + gun, rotated by aim offsets around the neck
-  const upper = new THREE.Group();
-  upper.position.set(0, 0.45, 0);
-  root.add(upper);
-  const helmet = mesh(geo('helmet', () => new THREE.SphereGeometry(0.21, 12, 9)), suit, 0, 0.15, -0.02);
-  upper.add(helmet);
-  const vis = mesh(geo('visor', () => new THREE.SphereGeometry(0.19, 12, 8, -Math.PI * 0.42, Math.PI * 0.84, Math.PI * 0.28, Math.PI * 0.4).rotateY(Math.PI)), visor, 0, 0.15, -0.045);
-  upper.add(vis);
-  upper.add(mesh(geo('hlamp', () => new THREE.BoxGeometry(0.05, 0.05, 0.05)), glow, 0.17, 0.2, -0.06));
-  // arms
-  const upperArm = geo('uarm', () => new THREE.CylinderGeometry(0.075, 0.07, 0.32, 6));
-  const fore = geo('farm', () => new THREE.CylinderGeometry(0.065, 0.06, 0.3, 6));
-  const ra = mesh(upperArm, suit, 0.27, -0.12, -0.12); ra.rotation.x = 1.2; upper.add(ra);
-  const rf = mesh(fore, suit, 0.18, -0.16, -0.36); rf.rotation.set(1.5, 0, 0.5); upper.add(rf);
-  const la = mesh(upperArm, suit, -0.27, -0.12, -0.12); la.rotation.x = 1.2; upper.add(la);
-  const lf = mesh(fore, suit, -0.1, -0.12, -0.42); lf.rotation.set(1.5, 0, -0.9); upper.add(lf);
-  const gunMount = new THREE.Group();
-  gunMount.position.set(0.12, -0.1, -0.4);
-  upper.add(gunMount);
+  const m = buildSoldier(TEAM_COLORS[team], TOWERS, NOZ_DIR);
+  const root = m.root;
   // thruster flames
-  const flameGeo = geo('flame', () => { const g = new THREE.ConeGeometry(0.055, 0.42, 6, 1, true); g.translate(0, -0.21, 0); return g; });
-  const flameMat = new THREE.MeshBasicMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
+  const flameGeo = new THREE.ConeGeometry(0.055, 0.42, 6, 1, true); flameGeo.translate(0, -0.21, 0);
+  const flameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xcfe8ff).multiplyScalar(1.6), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
   const flames = [];
   const up = new THREE.Vector3(0, 1, 0);
   for (const t of TOWERS) {
     for (let k = 0; k < 6; k++) {
       const f = new THREE.Mesh(flameGeo, flameMat);
       const exhaust = NOZ_DIR[k].clone().negate();
-      // cone points along -y after translate; orient so the flame extends along exhaust dir
       f.quaternion.setFromUnitVectors(up, exhaust.clone().negate());
-      f.position.copy(t.pos).addScaledVector(exhaust, 0.07);
+      f.position.copy(t.pos).addScaledVector(exhaust, 0.09);
       f.visible = false;
       f.userData.noOutline = true;
       root.add(f);
@@ -195,7 +114,7 @@ function buildModel(team) {
     }
   }
   const outlines = addOutlines(root);
-  return { root, upper, gunMount, flames, towerMeshes, outlines };
+  return { ...m, flames, outlines };
 }
 
 // ---------------- Soldier ----------------
@@ -229,6 +148,8 @@ export class Soldier {
       m.visible = false;
       this.model.gunMount.add(m);
       this.gunMeshes[k] = m;
+      // gun outlines (enemy highlight) share the model's outline list
+      for (const o of addOutlines(m)) this.model.outlines.push(o);
     }
     this.reset();
   }
@@ -249,6 +170,8 @@ export class Soldier {
     this.grenades = GRENADE.count;
     this.grenadeCool = 0;
     this.meleeCool = 0;
+    this.throwT = 0; this.throwDir = null; this.meleeT = 0;
+    this.ads = false; this.adsAmt = 0;
     this.lastDamageT = -99;
     this.lastThrustT = -99;
     this.lastAttacker = null;
@@ -579,6 +502,14 @@ export class Soldier {
     if (!this.alive) return;
     this.spawnProtect -= dt;
     this.grenadeCool -= dt; this.meleeCool -= dt;
+    this.meleeT = Math.max(0, this.meleeT - dt);
+    this.adsAmt += ((this.ads && !this.grab ? 1 : 0) - this.adsAmt) * Math.min(1, dt * 9);
+    if (this.throwT > 0) {
+      const before = this.throwT;
+      this.throwT -= dt;
+      if (before > THROW_TIME * 0.6 && this.throwT <= THROW_TIME * 0.6) this.game.combat.releaseGrenade(this);
+      if (this.throwT < 0) this.throwT = 0;
+    }
     // weapon timers
     for (const w of this.weapons) {
       w.cool -= dt;
@@ -631,10 +562,40 @@ export class Soldier {
     this.cur = i; this.switchT = 0.45;
   }
 
+  /** Third-person animation from gameplay timers: reload, grenade throw, hammer swing, recoil. */
+  animate3P(m) {
+    const w = this.weapon, t = this.game.time;
+    const bell = (x) => Math.sin(Math.max(0, Math.min(1, x)) * Math.PI);
+    const gm = m.gunMount, la = m.leftArm;
+    gm.position.set(0.13, -0.1, -0.4); gm.rotation.set(0, 0, 0);
+    la.rotation.set(0, 0, 0);
+    m.nade.visible = false;
+    if (!this.alive) return;
+    const kick = Math.max(0, 1 - (t - this.lastFireT) / 0.12);
+    gm.position.z += kick * 0.05; gm.rotation.x += kick * 0.12;
+    if (w.reloadT > 0 && w.def.reload > 0) {
+      const r = 1 - w.reloadT / w.def.reload, b = bell(r);
+      gm.rotation.z = 0.55 * b; gm.rotation.x += 0.35 * b; gm.position.y -= 0.05 * b;
+      la.rotation.x = 0.9 * bell(r * 1.3); la.rotation.z = -0.3 * b;
+    }
+    if (this.throwT > 0) {
+      const p = 1 - this.throwT / THROW_TIME;
+      gm.position.y -= 0.12 * bell(p); gm.rotation.x -= 0.7 * bell(p);
+      la.rotation.x = p < 0.55 ? 1.9 * (p / 0.55) : 1.9 - 3.6 * Math.min(1, (p - 0.55) / 0.2);
+      m.nade.visible = p > 0.1 && p < 0.65;
+    }
+    if (this.meleeT > 0) {
+      const p = 1 - this.meleeT / 0.35;
+      gm.position.z -= 0.25 * bell(p); gm.rotation.y = 0.5 * bell(p); gm.rotation.x -= 0.4 * bell(p);
+    }
+    if (this.switchT > 0) { const p = this.switchT / 0.45; gm.position.y -= 0.2 * p; gm.rotation.x -= 0.8 * p; }
+  }
+
   syncModel(dt) {
     const m = this.model;
     m.root.position.copy(this.pos);
     m.root.quaternion.copy(this.quat);
+    this.animate3P(m);
     for (const k in this.gunMeshes) this.gunMeshes[k].visible = this.alive && k === this.weapon.def.id;
     const pl = this.game.player;
     const outline = this.alive && !!pl && pl !== this && pl.team !== this.team && this.game.settings.outlines;

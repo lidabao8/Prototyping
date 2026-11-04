@@ -116,6 +116,27 @@
       <label><input type="checkbox" id="rule_infiniteGas"><span>Infinite gas</span></label>
       <label><input type="checkbox" id="optOutline"><span>Outline enemies</span></label>
     </div>
+    <h3>GRAPHICS</h3>
+    <div class="grid">
+      <label>Quality preset
+        <select id="gPreset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option><option value="custom">Custom</option></select>
+      </label>
+      <label>Render scale <span class="val" id="gScaleV"></span>
+        <input type="range" id="gScale" min="0.5" max="1.5" step="0.05">
+      </label>
+      <label>Shadows
+        <select id="gShadows"><option value="0">Off</option><option value="1024">Low</option><option value="2048">High</option><option value="4096">Ultra</option></select>
+      </label>
+      <label>Particles
+        <select id="gParticles"><option value="0.4">Low</option><option value="0.75">Medium</option><option value="1">High</option></select>
+      </label>
+    </div>
+    <div class="toggles">
+      <label><input type="checkbox" id="gBloom"><span>Bloom<small>glow on lights, jets and muzzle flashes</small></span></label>
+      <label><input type="checkbox" id="gAA"><span>Anti-aliasing<small>4× MSAA</small></span></label>
+      <label><input type="checkbox" id="gEnv"><span>Reflections<small>environment lighting on metal</small></span></label>
+      <label><input type="checkbox" id="gDmg"><span>Damage numbers<small>floating numbers on hits</small></span></label>
+    </div>
     <div class="row"><button id="btnDeploy">DEPLOY</button></div>
     <details>
       <summary>CONTROLS &amp; KEYBINDS</summary>

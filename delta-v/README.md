@@ -37,8 +37,9 @@ npm run build      # or: npm run watch / npm run serve (http://localhost:8081)
   * **GJ-3 gyrojet:** nearly recoilless. The rounds launch slowly and accelerate, with a small splash.
   * **RR-90 recoilless:** a single 88-damage slug and no recoil, but the backblast shoves (and hurts enemies) up to 7 m behind you.
   * **LM-2 maser:** hitscan beam with no recoil and no ammo. It overheats after about 2 s of continuous fire.
-* **Grenades:** fly straight and bounce elastically off walls.
+* **Grenades:** thrown at 18 m/s on a 3.5 s fuse. They fly straight, bounce elastically off walls, and leave the hand partway through a throw animation.
 * **Momentum hammer (V):** sends the target tumbling.
+* **Hip-fire vs aiming:** hip-fire spreads several times wider than aiming down the sights. Every gun has a working sight (holographic sights on the rifle, flechette and maser; scopes on the gyrojet and recoilless), aligned to the screen centre when you aim, with its own magnification. Bots aim down the sights once they've settled on a target at range.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
 * **Wall and pod impacts:** hitting a wall above 8 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
 
@@ -53,6 +54,36 @@ Each kind of unintended thrust can be switched off on its own:
 
 There are also options for infinite gas and enemy outlines.
 
+## Graphics
+
+**Quality presets:** Low, Medium, High and Ultra, plus individual settings:
+
+* Render scale.
+* Sun shadows, which follow you so they stay crisp on the big map.
+* Bloom on lights, thrusters, beams and muzzle flashes.
+* 4× MSAA.
+* Particle density.
+* Environment reflections on metal.
+
+**Models and textures:**
+
+* Soldiers, guns, pods and the stations are detailed models built from rounded parts, merged per material so they stay cheap to draw.
+* Hull and container textures have generated normal maps.
+* The hangar has pipe runs, wall lamps, vents, beacons and spawn consoles. The yard has antennas, a dish, lit windows and navigation lights.
+
+**Animations:** first-person and third-person animations for:
+
+* recoil;
+* magazine reloads (mag drops, the hand fetches a new one);
+* shell-by-shell flechette reloads;
+* the flechette pump after each shot;
+* recoilless breech loading;
+* maser venting when overheated;
+* grenade wind-up and throw;
+* hammer strikes;
+* weapon swaps;
+* view sway from mouse movement and RCS thrust.
+
 ## HUD
 
 The HUD shows:
@@ -61,6 +92,7 @@ The HUD shows:
 * Enemies outlined in red. The lead marker is a small diamond that fades out when it nearly overlaps the target.
 * Rotation-rate arcs around the reticle for yaw, pitch and roll.
 * Range, relative velocity and closing speed to whatever is under the crosshair.
+* Hitmarkers that pop and fade: white for body hits, yellow for headshots, red with a ring for kills. Optional floating damage numbers stack rapid hits.
 * A `COLLISION x.x s` time-to-impact warning.
 * Δv, N₂, HP and O₂ readouts, and a suit diagram showing quad health, nozzle activity and leaks.
 * An optional reference grid (H). It also fades in automatically when you tumble.
@@ -95,7 +127,7 @@ Bots fly the same suit through the same thruster allocation, with the same gas b
   * They penalise spots that several known enemies can see, spread out from teammates, and flankers take angles away from the team's line of fire.
   * Hurt bots retreat to cover that no known enemy can see.
   * Bots hunt the last known position from a flanking angle while pre-aiming it.
-  * They grenade enemies who have just ducked behind cover, and use grenades on anchored targets.
+  * Grenades: they throw at anchored or slow targets (up to 55 m), at enemies bunched together, when they're losing a duel, and at enemies who just ducked behind cover. They lead the throw and never throw near teammates.
   * They swap to the flechette up close instead of reloading, and use the gyrojet on slow or anchored targets.
 * **Movement:**
   * Paths come from A* over a 3D navigation graph of free-space and surface nodes, smoothed by string-pulling.

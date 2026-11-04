@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { rayBox, raySphere, closestOnBox, clamp, MinHeap, rand } from './math.js';
+import { buildPod } from './models.js';
 
 const HX = 72, HY = 36, HZ = 36;
 
@@ -8,10 +9,35 @@ export const MAPS = {
   yard: { name: 'Derelict Yard', desc: 'Open orbit, 300 m across. No walls: drift too far and your suit runs out of luck.', enclosed: false, bounds: [150, 70, 70], navStep: [11, 11], navR: 19.5, spawnX: 124 },
 };
 
+/** Normal map from a texture's luminance (grooves and bolts read as relief). */
+function normalFromCanvas(src, strength = 2.5) {
+  const w = src.width, h = src.height;
+  const sd = src.getContext('2d').getImageData(0, 0, w, h).data;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  const out = g.createImageData(w, h);
+  const L = (x, y) => { x = (x + w) % w; y = (y + h) % h; const i = (y * w + x) * 4; return (sd[i] * 0.3 + sd[i + 1] * 0.59 + sd[i + 2] * 0.11) / 255; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = (L(x + 1, y) - L(x - 1, y)) * strength, dy = (L(x, y + 1) - L(x, y - 1)) * strength;
+    const n = 1 / Math.hypot(dx, dy, 1);
+    const i = (y * w + x) * 4;
+    out.data[i] = (-dx * n * 0.5 + 0.5) * 255; out.data[i + 1] = (dy * n * 0.5 + 0.5) * 255; out.data[i + 2] = (n * 0.5 + 0.5) * 255; out.data[i + 3] = 255;
+  }
+  g.putImageData(out, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+function panelMat(base, line, accent, size, cells, opts) {
+  const map = panelTexture(base, line, accent, size, cells);
+  return new THREE.MeshStandardMaterial({ map, normalMap: normalFromCanvas(map.image), normalScale: new THREE.Vector2(0.8, 0.8), ...opts });
+}
+
 function panelTexture(base, line, accent, size = 256, cells = 2) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
-  const g = c.getContext('2d');
+  const g = c.getContext('2d', { willReadFrequently: true });
   g.fillStyle = base; g.fillRect(0, 0, size, size);
   // noise
   const img = g.getImageData(0, 0, size, size);
@@ -58,7 +84,7 @@ function hazardTexture() {
 function containerTexture(color) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
-  const g = c.getContext('2d');
+  const g = c.getContext('2d', { willReadFrequently: true });
   g.fillStyle = color; g.fillRect(0, 0, 256, 128);
   for (let x = 0; x < 256; x += 12) {
     g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(x, 0, 4, 128);
@@ -69,6 +95,11 @@ function containerTexture(color) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+function contMat(color) {
+  const map = containerTexture(color);
+  return new THREE.MeshStandardMaterial({ map, normalMap: normalFromCanvas(map.image, 3), roughness: 0.7, metalness: 0.45 });
 }
 
 function planetTexture() {
@@ -129,20 +160,20 @@ export class World {
     this._hit = { t: 0, n: new THREE.Vector3(), kind: '', obj: null };
     this._rb = { n: [0, 0, 0] };
     this.mats = {
-      hull: new THREE.MeshStandardMaterial({ map: panelTexture('#59616a', '#3a4047', null), roughness: 0.85, metalness: 0.35 }),
-      hullBlue: new THREE.MeshStandardMaterial({ map: panelTexture('#3d5470', '#26364a', '#3f8cff'), roughness: 0.8, metalness: 0.35 }),
-      hullOrange: new THREE.MeshStandardMaterial({ map: panelTexture('#6e5440', '#4a3626', '#ff8a2a'), roughness: 0.8, metalness: 0.35 }),
-      deck: new THREE.MeshStandardMaterial({ map: panelTexture('#3e4349', '#2b2f33', '#c9a227', 256, 4), roughness: 0.9, metalness: 0.3 }),
-      ceil: new THREE.MeshStandardMaterial({ map: panelTexture('#7c848c', '#5c636a', null, 256, 4), roughness: 0.85, metalness: 0.3 }),
-      steel: new THREE.MeshStandardMaterial({ map: panelTexture('#80878e', '#5a6067', null, 128, 1), roughness: 0.6, metalness: 0.6 }),
+      hull: panelMat('#59616a', '#3a4047', null, 256, 2, { roughness: 0.8, metalness: 0.4 }),
+      hullBlue: panelMat('#3d5470', '#26364a', '#3f8cff', 256, 2, { roughness: 0.75, metalness: 0.4 }),
+      hullOrange: panelMat('#6e5440', '#4a3626', '#ff8a2a', 256, 2, { roughness: 0.75, metalness: 0.4 }),
+      deck: panelMat('#3e4349', '#2b2f33', '#c9a227', 256, 4, { roughness: 0.85, metalness: 0.35 }),
+      ceil: panelMat('#7c848c', '#5c636a', null, 256, 4, { roughness: 0.8, metalness: 0.35 }),
+      steel: panelMat('#80878e', '#5a6067', null, 128, 1, { roughness: 0.5, metalness: 0.7 }),
       girder: new THREE.MeshStandardMaterial({ map: hazardTexture(), roughness: 0.7, metalness: 0.5 }),
-      cRed: new THREE.MeshStandardMaterial({ map: containerTexture('#8c3a2b'), roughness: 0.75, metalness: 0.4 }),
-      cTeal: new THREE.MeshStandardMaterial({ map: containerTexture('#2b6f73'), roughness: 0.75, metalness: 0.4 }),
-      cYel: new THREE.MeshStandardMaterial({ map: containerTexture('#a88a2c'), roughness: 0.75, metalness: 0.4 }),
-      cGrey: new THREE.MeshStandardMaterial({ map: containerTexture('#5b6168'), roughness: 0.75, metalness: 0.4 }),
-      stripW: new THREE.MeshBasicMaterial({ color: 0xcfe6ff }),
-      stripB: new THREE.MeshBasicMaterial({ color: 0x3f8cff }),
-      stripO: new THREE.MeshBasicMaterial({ color: 0xff8a2a }),
+      cRed: contMat('#8c3a2b'),
+      cTeal: contMat('#2b6f73'),
+      cYel: contMat('#a88a2c'),
+      cGrey: contMat('#5b6168'),
+      stripW: new THREE.MeshBasicMaterial({ color: new THREE.Color(0xcfe6ff).multiplyScalar(1.8) }),
+      stripB: new THREE.MeshBasicMaterial({ color: new THREE.Color(0x3f8cff).multiplyScalar(1.8) }),
+      stripO: new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff8a2a).multiplyScalar(1.8) }),
       glyphB: new THREE.MeshBasicMaterial({ color: 0x1d4a8a }),
       glyphO: new THREE.MeshBasicMaterial({ color: 0x8a4a16 }),
     };
@@ -163,6 +194,7 @@ export class World {
       const sx = max[0] - min[0], sy = max[1] - min[1], sz = max[2] - min[2];
       const mesh = new THREE.Mesh(boxGeo(sx, sy, sz, opts.tile || 4), mat);
       mesh.position.set((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+      mesh.castShadow = true; mesh.receiveShadow = true;
       this.group.add(mesh);
       b.mesh = mesh;
     }
@@ -187,7 +219,7 @@ export class World {
     const g = this.group;
     const wall = (sx, sy, sz, x, y, z, mat, tile = 6) => {
       const m = new THREE.Mesh(boxGeo(sx, sy, sz, tile), mat);
-      m.position.set(x, y, z); g.add(m); return m;
+      m.position.set(x, y, z); m.receiveShadow = true; g.add(m); return m;
     };
     // x walls (team ends)
     wall(T, 2 * HY, 2 * HZ, -HX - T / 2, 0, 0, this.mats.hullBlue, 8);
@@ -239,9 +271,10 @@ export class World {
     const M = this.mats;
     // ---- Central reactor ----
     this.spheres.push({ c: new THREE.Vector3(0, 0, 0), r: 6 });
-    const reactor = new THREE.Mesh(new THREE.IcosahedronGeometry(6, 2), new THREE.MeshStandardMaterial({ color: 0x6a737c, roughness: 0.4, metalness: 0.8, flatShading: true }));
+    const reactor = new THREE.Mesh(new THREE.IcosahedronGeometry(6, 3), new THREE.MeshStandardMaterial({ color: 0x6a737c, roughness: 0.35, metalness: 0.85, flatShading: true }));
+    reactor.castShadow = true; reactor.receiveShadow = true;
     this.group.add(reactor);
-    const core = new THREE.Mesh(new THREE.TorusGeometry(6.15, 0.35, 8, 48), new THREE.MeshBasicMaterial({ color: 0x5ff6ff }));
+    const core = new THREE.Mesh(new THREE.TorusGeometry(6.15, 0.35, 8, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x5ff6ff).multiplyScalar(2.2) }));
     core.rotation.x = Math.PI / 2; this.group.add(core);
     const core2 = core.clone(); core2.rotation.set(0, Math.PI / 2, 0); this.group.add(core2);
     this.reactorRings = [core, core2];
@@ -299,6 +332,8 @@ export class World {
     this.group.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(0.4, 0.3, 1); this.group.add(sun);
+    this.sun = sun;
+    this.buildHangarDetail();
     const fill = new THREE.DirectionalLight(0x9db8ff, 0.6);
     fill.position.set(-0.5, -0.6, -1); this.group.add(fill);
     const lb = new THREE.PointLight(0x3f8cff, 22, 50, 1); lb.position.set(-62, 0, 0); this.group.add(lb);
@@ -349,17 +384,12 @@ export class World {
   }
 
   buildPods() {
-    const geo = new THREE.IcosahedronGeometry(1.1, 1);
-    const band = new THREE.TorusGeometry(1.12, 0.12, 6, 20);
+    const proto = buildPod();
     const places = this.enclosed
       ? [[8, 14, 12], [-8, -14, -12], [30, 0, -24], [-30, 0, 24], [50, 26, 10], [-50, -26, -10], [0, 28, 20], [0, -28, -20]]
       : [[20, 30, 20], [-20, -30, -20], [60, -15, 35], [-60, 15, -35], [95, 25, 10], [-95, -25, -10], [40, 40, -40], [-40, -40, 40], [0, 35, -30], [0, -35, 30], [75, -45, -30], [-75, 45, 30]];
     places.forEach((p, i) => {
-      const mesh = new THREE.Group();
-      mesh.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: i % 2 ? 0xb8bcc2 : 0x9aa7b3, roughness: 0.55, metalness: 0.5, flatShading: true })));
-      const b = new THREE.Mesh(band, new THREE.MeshBasicMaterial({ color: 0xffd04a }));
-      mesh.add(b);
-      const b2 = b.clone(); b2.rotation.y = Math.PI / 2; mesh.add(b2);
+      const mesh = proto.clone();
       this.group.add(mesh);
       const pod = {
         pos: new THREE.Vector3(...p), vel: new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(0.8),
@@ -369,6 +399,69 @@ export class World {
       mesh.position.copy(pod.pos);
       this.pods.push(pod);
     });
+  }
+
+  // ---------- Decorative detail (no collision) ----------
+  deco(geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z); m.rotation.set(rx, ry, rz);
+    m.castShadow = false; m.receiveShadow = true;
+    this.group.add(m);
+    return m;
+  }
+
+  buildHangarDetail() {
+    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x8a6f4a, roughness: 0.45, metalness: 0.8 });
+    const pipeMat2 = new THREE.MeshStandardMaterial({ color: 0x5d6b78, roughness: 0.4, metalness: 0.85 });
+    const fixture = new THREE.MeshStandardMaterial({ color: 0x2c3137, roughness: 0.6, metalness: 0.6 });
+    const lampMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff1d6).multiplyScalar(2.2) });
+    const red = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff3020).multiplyScalar(2) });
+    // pipe runs along the z-walls (above and below the windows)
+    for (const s of [-1, 1]) for (const [y, r, m] of [[15, 0.35, pipeMat], [16.2, 0.22, pipeMat2], [-15, 0.35, pipeMat2], [-16.3, 0.25, pipeMat]]) {
+      const pipe = this.deco(new THREE.CylinderGeometry(r, r, 2 * HX - 4, 12), m, 0, y, s * (HZ - 0.6 - r), 0, 0, Math.PI / 2);
+      void pipe;
+      for (let x = -HX + 8; x < HX - 4; x += 12) this.deco(new THREE.TorusGeometry(r + 0.04, 0.06, 6, 14), fixture, x, y, s * (HZ - 0.6 - r), 0, Math.PI / 2, 0);
+    }
+    // wall lamps with bloom
+    for (const s of [-1, 1]) for (let x = -60; x <= 60; x += 20) {
+      this.deco(new THREE.BoxGeometry(2.2, 0.5, 0.4), fixture, x, 24, s * (HZ - 0.2));
+      this.deco(new THREE.BoxGeometry(2.0, 0.22, 0.1), lampMat, x, 24, s * (HZ - 0.42));
+      this.deco(new THREE.BoxGeometry(2.2, 0.5, 0.4), fixture, x, -24, s * (HZ - 0.2));
+      this.deco(new THREE.BoxGeometry(2.0, 0.22, 0.1), lampMat, x, -24, s * (HZ - 0.42));
+    }
+    // floor/ceiling vents and hazard beacons
+    for (let x = -60; x <= 60; x += 15) for (const y of [-HY + 0.05, HY - 0.05]) {
+      this.deco(new THREE.BoxGeometry(3, 0.1, 1.6), fixture, x, y, -30);
+      this.deco(new THREE.BoxGeometry(3, 0.1, 1.6), fixture, x, y, 30);
+    }
+    for (const x of [-56, 56]) for (const y of [-15, 15]) for (const z of [-19, 19]) this.deco(new THREE.SphereGeometry(0.25, 10, 8), red, x * 1.0 + (x > 0 ? 0.8 : -0.8), y, z);
+    // spawn-bay consoles
+    for (const s of [-1, 1]) for (const z of [-24, 24]) {
+      const c = this.deco(new THREE.BoxGeometry(1.2, 2.4, 3.2), fixture, s * 70.6, -6, z);
+      void c;
+      this.deco(new THREE.PlaneGeometry(2.6, 1.4), new THREE.MeshBasicMaterial({ color: new THREE.Color(s < 0 ? 0x3f8cff : 0xff8a2a).multiplyScalar(1.4) }), s * 69.95, -5.6, z, 0, -s * Math.PI / 2, 0);
+    }
+  }
+
+  buildYardDetail() {
+    const mast = new THREE.MeshStandardMaterial({ color: 0x9aa2aa, roughness: 0.35, metalness: 0.85 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x2c3137, roughness: 0.6, metalness: 0.6 });
+    const dish = new THREE.MeshStandardMaterial({ color: 0xd5d9de, roughness: 0.4, metalness: 0.4, side: THREE.DoubleSide });
+    const blinkG = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x40ff70).multiplyScalar(2.5) });
+    const blinkR = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff3020).multiplyScalar(2.5) });
+    const win = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a0).multiplyScalar(1.6) });
+    // antenna masts and a dish on the hub
+    this.deco(new THREE.CylinderGeometry(0.15, 0.15, 14, 8), mast, 0, 27, 0);
+    this.deco(new THREE.SphereGeometry(0.4, 10, 8), blinkR, 0, 34.2, 0);
+    const d = this.deco(new THREE.SphereGeometry(5, 24, 8, 0, Math.PI * 2, 0, 0.7), dish, 0, -28, 0, Math.PI, 0, 0);
+    d.castShadow = true;
+    this.deco(new THREE.CylinderGeometry(0.2, 0.2, 6, 8), mast, 0, -24, 0);
+    // lit windows along the hub module
+    for (let x = -12; x <= 12; x += 3) for (const z of [-7.02, 7.02]) this.deco(new THREE.PlaneGeometry(1.4, 0.8), win, x, 3, z, 0, z > 0 ? 0 : Math.PI, 0);
+    // navigation lights at the dock corners
+    for (const s of [-1, 1]) for (const y of [-20, 20]) for (const z of [-30, 30]) this.deco(new THREE.SphereGeometry(0.5, 10, 8), s < 0 ? blinkG : blinkR, s * 129, y, z);
+    // truss cable runs
+    for (const s of [-1, 1]) this.deco(new THREE.CylinderGeometry(0.12, 0.12, 100, 6), dark, s * 65, 0, 0, 0, 0, Math.PI / 2);
   }
 
   // ---------- Queries ----------
@@ -786,7 +879,7 @@ export class World {
     plates.forEach(([a, b]) => this.addMirrored(a, b, M.steel, M.steel, { tile: 3 }));
     // asteroids (collision spheres)
     const rocks = [[45, 35, 30, 9], [75, -40, -20, 12], [30, -30, 45, 7], [100, 40, -45, 10], [60, 20, -52, 6], [112, -38, 42, 8], [20, 46, -28, 5], [86, 0, 54, 7], [130, 50, 0, 9]];
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x6b625a, roughness: 1, flatShading: true });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x6b625a, roughness: 0.95, metalness: 0.05, flatShading: true });
     const addRock = (x, y, z, r) => {
       const g = new THREE.IcosahedronGeometry(r, 2);
       const pa = g.attributes.position, v = new THREE.Vector3();
@@ -798,6 +891,7 @@ export class World {
       }
       g.computeVertexNormals();
       const m = new THREE.Mesh(g, rockMat);
+      m.castShadow = true; m.receiveShadow = true;
       m.position.set(x, y, z); m.rotation.set(Math.random() * 3, Math.random() * 3, 0);
       this.group.add(m);
       this.spheres.push({ c: new THREE.Vector3(x, y, z), r });
@@ -814,6 +908,8 @@ export class World {
     // lighting: hard sunlight, dim earthshine
     this.group.add(new THREE.HemisphereLight(0x9ab4ff, 0x2a3348, 0.7));
     const sun = new THREE.DirectionalLight(0xfff2dd, 3.2); sun.position.set(-0.3, 0.5, -1); this.group.add(sun);
+    this.sun = sun;
+    this.buildYardDetail();
     const earth = new THREE.DirectionalLight(0x6f9cff, 0.8); earth.position.set(0.2, -1, 0.5); this.group.add(earth);
     const lb = new THREE.PointLight(0x3f8cff, 30, 60, 1); lb.position.set(-122, 0, 0); this.group.add(lb);
     const lo = new THREE.PointLight(0xff8a2a, 30, 60, 1); lo.position.set(122, 0, 0); this.group.add(lo);
