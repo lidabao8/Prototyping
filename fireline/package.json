@@ -1,0 +1,16 @@
+{
+  "name": "fireline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FIRELINE - 16v16 low-poly combined-infantry shooter with AI bots",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=dist/fireline.js",
+    "watch": "esbuild src/main.js --bundle --sourcemap --format=iife --target=es2020 --outfile=dist/fireline.js --watch",
+    "serve": "python3 -m http.server 8080",
+    "build:dev": "esbuild src/main.js --bundle --sourcemap --format=iife --target=es2020 --outfile=dist/fireline.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "three": "0.170.0"
+  }
+}
