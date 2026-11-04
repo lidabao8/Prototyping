@@ -44,6 +44,19 @@ export const G = {
   tube(r, len, seg, color, x = 0, y = 0, z = 0, rx = Math.PI / 2, ry = 0, rz = 0) {
     return place(colorize(new THREE.CylinderGeometry(r, r, len, seg, 1, true), color), x, y, z, rx, ry, rz);
   },
+  ring(rIn, rOut, seg, color, x = 0, y = 0, z = 0) {
+    return place(colorize(new THREE.RingGeometry(rIn, rOut, seg), color), x, y, z);
+  },
+  // hollow sleeve: outer + inner wall + end caps, axis along Z
+  sleeve(rOut, rIn, len, seg, color, x = 0, y = 0, z = 0) {
+    const parts = [
+      place(colorize(new THREE.CylinderGeometry(rOut, rOut, len, seg, 1, true), color), x, y, z, Math.PI / 2),
+      place(colorize(new THREE.CylinderGeometry(rIn, rIn, len, seg, 1, true), color), x, y, z, Math.PI / 2),
+      place(colorize(new THREE.RingGeometry(rIn, rOut, seg), color), x, y, z + len / 2),
+      place(colorize(new THREE.RingGeometry(rIn, rOut, seg), color), x, y, z - len / 2, 0, Math.PI, 0),
+    ];
+    return parts;
+  },
   cone(r, h, seg, color, x = 0, y = 0, z = 0, jitter = 0) {
     return place(colorize(new THREE.ConeGeometry(r, h, seg), color, jitter), x, y, z);
   },

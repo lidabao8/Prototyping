@@ -33,6 +33,11 @@ export const ACTIONS = [
   { id: 'light', label: 'Flashlight', def: 'KeyL' },
   { id: 'scoreboard', label: 'Scoreboard', def: 'Tab' },
   { id: 'map', label: 'Map', def: 'KeyM' },
+  { group: 'Trackpad & accessibility' },
+  { id: 'lookLeft', label: 'Look left', def: 'ArrowLeft' },
+  { id: 'lookRight', label: 'Look right', def: 'ArrowRight' },
+  { id: 'lookUp', label: 'Look up', def: 'ArrowUp' },
+  { id: 'lookDown', label: 'Look down', def: 'ArrowDown' },
 ];
 
 const NAMES = {

@@ -1,6 +1,6 @@
 # FIRELINE
 
-A 16 vs 16 low-poly infantry shooter for the browser with AI bots. You play alongside 31 AI soldiers in eight four-person squads. There are four maps (two large, two built for close quarters), three game modes and destructible buildings. Every visual effect can be turned off in the settings, and every key can be rebound.
+A 16 vs 16 low-poly infantry shooter for the browser with AI bots. You play alongside 31 AI soldiers in eight four-person squads. There are six maps (two large, two built for close quarters, two small), three game modes and destructible buildings. Every visual effect can be turned off in the settings, and every key can be rebound.
 
 This game is separate from the other prototypes in this repository. It lives entirely in `fireline/`, has its own build, and needs no asset files: all models, textures and sounds are generated in code when the game starts.
 
@@ -35,6 +35,17 @@ cd fireline && npm install && npm run build
 **Movement**
 - Sprint, slide (crouch while sprinting), crouch, prone, and lean left/right.
 - Vault over low cover, climb ledges, windows and containers, and swim.
+
+**Aiming and visibility**
+- Aiming down sights is now more accurate: tighter spread, a precise first shot from a still stance, and a learnable recoil pattern. Hip fire is unchanged.
+- Hitboxes follow each soldier's animated skeleton, so what you see is what you hit.
+- Visible enemies get a thin red outline. Walls, terrain and props hide it exactly like they hide the soldier, and spot markers only appear when you have line of sight.
+- Every sight has a detailed model with glass: hollow iron aperture, red dot, holographic, 2x prism, and a full scope view with reticles for the 4x ACOG (chevron with range ticks) and 8x scope (mil-dot duplex).
+
+**Trackpad and accessibility**
+- Aim assist (off, low, medium, high): slows your aim over a visible enemy, gently pulls toward them, and snaps a little when you aim down sights. It never targets enemies behind cover.
+- Look smoothing, arrow-key look, auto-sprint, and hold-to-fire for semi-automatic weapons.
+- A one-click **Trackpad mode** in Settings turns these on together with toggle aim, crouch and lean.
 
 **Leaning and positioning**
 - Leaning moves your head and shoulders about 0.6m out while your body stays behind cover, and it steadies your aim slightly while aiming.
@@ -90,8 +101,10 @@ Bots fill input exactly as the player does: they move, aim and shoot through the
 - **Port Kessar** (720 × 720 m, afternoon): a desert harbor town with a dense street grid. Flags are Ridge Outpost, Container Depot, Old Town, Pump Station and Harbor (with piers on the sea).
 - **Ironworks** (440 × 440 m, overcast, close quarters): a foundry with a furnace hall, a rail yard of boxcars, a smelter courtyard and loading docks. Four flags.
 - **Brennhof** (400 × 400 m, dusk, close quarters): a packed old town split by a canal, with narrow streets, a market square, station, brewery, church and town hall. Five flags.
+- **Outpost Zero** (224 m play area, noon, small): a walled desert base with barracks rows, a comms tower and a motor pool inside a hesco perimeter. Three flags.
+- **Frostpine** (244 m play area, snowfall, small): a snowed-in mountain village with a timber ski lodge, cabins among snowy pines, a frozen pond and a sawmill. Three flags.
 
-You can switch any map to morning, noon, afternoon, dusk, overcast or night. At night, use the flashlight [L].
+You can switch any map to morning, noon, afternoon, dusk, overcast, snow or night. At night, use the flashlight [L].
 
 ## Graphics (each one can be toggled in Settings)
 Quality presets go from Low to Ultra. Individual settings:
@@ -135,6 +148,7 @@ Every action can be rebound under **Controls** in the main or pause menu. Defaul
 | T | Spot enemies; squad leaders also give orders |
 | L | Flashlight |
 | Tab / M / Esc | Scoreboard / map / pause |
+| Arrow keys | Look around (handy on a trackpad) |
 
 ## Code layout
 `src/core` (math, settings, audio, input) · `src/world` (terrain, maps, buildings, vegetation, collision) · `src/render` (materials, sky and shadows, water, post-processing, textures) · `src/entities` (soldier, player, models) · `src/ai` (navigation grid, bot brain) · `src/game` (match flow, combat, modes, squads) · `src/ui` (HUD, menus). The build uses three.js r170 and is bundled with esbuild into `dist/fireline.js`.

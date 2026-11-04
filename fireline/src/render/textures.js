@@ -112,6 +112,12 @@ export function getTexture(name) {
       }
     }); break;
     case 'cloth': t = canvasTex(128, (g, s) => { noiseFill(g, s, [230, 230, 230], [20, 20, 20], 4, 22); g.fillStyle = 'rgba(0,0,0,0.12)'; for (let i = 0; i < s; i += 16) g.fillRect(i, 0, 8, s); }); break;
+    case 'snow': t = canvasTex(256, (g, s) => { noiseFill(g, s, [232, 236, 242], [20, 20, 16], 4, 31); speckle(g, s, 700, ['#ffffff', '#dfe6ee', '#cfd8e2'], 1, 3, 32, 0.45); }); break;
+    case 'ice': t = canvasTex(256, (g, s) => {
+      noiseFill(g, s, [176, 204, 222], [26, 22, 18], 3, 33);
+      const r = makeRng(34); g.strokeStyle = 'rgba(255,255,255,0.45)'; g.lineWidth = 1;
+      for (let i = 0; i < 30; i++) { g.beginPath(); let x = r() * s, y = r() * s; g.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (r() - 0.5) * 60; y += (r() - 0.5) * 60; g.lineTo(x, y); } g.stroke(); }
+    }); break;
     case 'noise': t = canvasTex(256, (g, s) => noiseFill(g, s, [128, 128, 128], [127, 127, 127], 2, 23, 5), { srgb: false }); break;
     case 'smoke': t = canvasTex(128, (g, s) => {
       const n = makeNoise2D(77); const img = g.createImageData(s, s); const d = img.data;

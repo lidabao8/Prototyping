@@ -27,6 +27,7 @@ const GRADES = {
   afternoon: { sat: 1.04, contrast: 1.07, lift: [0.015, 0.01, 0.0], gamma: [1, 1, 1], gain: [1.05, 1.0, 0.9] },
   dusk: { sat: 1.12, contrast: 1.08, lift: [0.02, 0.0, 0.02], gamma: [1, 1, 1], gain: [1.08, 0.96, 0.88] },
   overcast: { sat: 0.9, contrast: 1.08, lift: [0.01, 0.012, 0.016], gamma: [1, 1, 1], gain: [0.98, 1.0, 1.03] },
+  snow: { sat: 0.9, contrast: 1.05, lift: [0.0, 0.01, 0.02], gamma: [1, 1, 1], gain: [0.98, 1.0, 1.04] },
   night: { sat: 0.85, contrast: 1.05, lift: [0.0, 0.01, 0.03], gamma: [1, 1, 1.05], gain: [0.92, 0.98, 1.1] },
 };
 
@@ -127,6 +128,7 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.audio.setVolume(S.get('volume'));
     if (key === 'difficulty') for (const s of this.soldiers) if (s.brain) s.brain.setDifficulty(S.get('difficulty'));
+    if (key === 'enemyOutline' || key === undefined) for (const s of this.soldiers) if (s.rig && s.rig.outlined) { s.rig.outlineOn = S.get('enemyOutline'); s.rig._olv = null; }
     if (key === 'renderScale' || key === 'antialias' || key === undefined) this.app.resize();
   }
 
@@ -412,6 +414,7 @@ export class Game {
     this.mode.update(dt);
     this.squads.update(dt);
     this.ai.update();
+    if (this.def.weather === 'snow') this.updateSnow(dt);
     this.fx.update(dt);
     this.world.updateFlags(this.mode, this.time);
     for (const s of this.soldiers) s.updateAnim(dt, this.camera.position);
@@ -420,6 +423,16 @@ export class Game {
     if (!this.ended) {
       this.hud.update(dt);
       if (p.state === 'dead') this.menus.updateDeploy(this);
+    }
+  }
+
+  updateSnow(dt) {
+    const cam = this.camera.position, fx = this.fx;
+    this.snowAcc = (this.snowAcc || 0) + dt * 120 * fx.q;
+    while (this.snowAcc >= 1) {
+      this.snowAcc -= 1;
+      const x = cam.x + (Math.random() - 0.5) * 50, z = cam.z + (Math.random() - 0.5) * 50;
+      fx.smoke.emit(x, cam.y + 6 + Math.random() * 10, z, 0.7 + Math.random() * 0.4, -1.6 - Math.random() * 0.6, 0.3, 6.5, 0.07, 0.07, [1, 1, 1, 0.9], [1, 1, 1, 0.85], 0, 0, 1);
     }
   }
 

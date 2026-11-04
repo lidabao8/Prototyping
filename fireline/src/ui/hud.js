@@ -34,7 +34,7 @@ export class HUD {
     this.progress = el('div', 'progress', root); this.progress.innerHTML = '<div></div>';
     this.toasts = el('div', 'scoretoasts', root);
     this.msg = el('div', 'hudmsg', root);
-    this.scope = el('div', 'scope', root); this.scope.innerHTML = '<div class="scope-ring"></div><div class="scope-h"></div><div class="scope-v"></div><div class="scope-dot"></div>';
+    this.scope = el('canvas', 'scopecv', root); this.scopeCtx = this.scope.getContext('2d');
     this.downedEl = el('div', 'downed', root);
     this.oob = el('div', 'oob', root);
     this.fps = el('div', 'fps', root);
@@ -112,6 +112,10 @@ export class HUD {
     this.updateCapture();
     const scoped = g.playerCtl && g.playerCtl.isScoped();
     this.scope.style.display = scoped ? 'block' : 'none';
+    if (scoped) {
+      const kind = p.weapon && p.weapon.id === 'binoculars' ? 'binoc' : (p.gun && p.gun.stats.sightId === 'scope8' ? 'scope8' : 'acog');
+      this.drawScope(kind, p, dt);
+    }
     // hold-breath meter while scoped
     const ctl = g.playerCtl;
     const showBreath = scoped && p.gun && ctl;
@@ -284,6 +288,72 @@ export class HUD {
     const team = f.progress >= 0 ? 0 : 1;
     fill.style.width = `${prog * 100}%`;
     fill.style.background = f.progress === 0 ? NEUTRAL : team === my ? FRIEND : ENEMY;
+  }
+
+  // ---------- scope overlay ----------
+  drawScope(kind, p, dt) {
+    const cv = this.scope, dpr = this.dpr;
+    const W = Math.floor(window.innerWidth * dpr), H = Math.floor(window.innerHeight * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const c = this.scopeCtx;
+    c.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) * (kind === 'binoc' ? 0.36 : 0.43);
+    const circles = kind === 'binoc' ? [[cx - R * 0.55, cy, R], [cx + R * 0.55, cy, R]] : [[cx, cy, R]];
+    // eye-relief shadow follows sway and movement
+    this._sbob = (this._sbob || 0) + dt * Math.hypot(p.vel.x, p.vel.z) * 2.2;
+    const mv = Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 3);
+    const ox = (p.swayY * 900 + Math.sin(this._sbob) * 10 * mv) * dpr, oy = (p.swayP * 900 + Math.abs(Math.cos(this._sbob)) * 12 * mv) * dpr;
+    // mask
+    c.fillStyle = '#050505'; c.fillRect(0, 0, W, H);
+    c.globalCompositeOperation = 'destination-out';
+    for (const [x, y, r] of circles) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+    c.globalCompositeOperation = 'source-over';
+    c.save();
+    c.beginPath(); for (const [x, y, r] of circles) { c.moveTo(x + r, y); c.arc(x, y, r, 0, 7); } c.clip();
+    for (const [x, y, r] of circles) {
+      const sh = c.createRadialGradient(x + ox, y + oy, r * 0.72, x + ox, y + oy, r * 1.08);
+      sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(0.7, 'rgba(0,0,0,0.55)'); sh.addColorStop(1, 'rgba(0,0,0,0.98)');
+      c.fillStyle = sh; c.fillRect(x - r, y - r, r * 2, r * 2);
+      const tint = c.createRadialGradient(x, y, 0, x, y, r);
+      tint.addColorStop(0, 'rgba(120,160,200,0.0)'); tint.addColorStop(1, 'rgba(60,90,130,0.18)');
+      c.fillStyle = tint; c.fillRect(x - r, y - r, r * 2, r * 2);
+      c.strokeStyle = 'rgba(255,255,255,0.07)'; c.lineWidth = r * 0.06; c.beginPath(); c.arc(x, y, r * 0.86, Math.PI * 1.08, Math.PI * 1.42); c.stroke();
+    }
+    c.restore();
+    // reticle
+    const k = dpr;
+    c.save();
+    c.beginPath(); for (const [x, y, r] of circles) { c.moveTo(x + r, y); c.arc(x, y, r, 0, 7); } c.clip();
+    c.lineCap = 'butt';
+    if (kind === 'scope8') {
+      c.fillStyle = c.strokeStyle = '#0a0a0a';
+      const post = 7 * k, thin = 1.4 * k, inner = R * 0.42;
+      c.fillRect(cx - R, cy - post / 2, R - inner, post); c.fillRect(cx + inner, cy - post / 2, R - inner, post);
+      c.fillRect(cx - post / 2, cy + inner, post, R - inner); c.fillRect(cx - post / 2, cy - R, post, R - inner);
+      c.fillRect(cx - inner, cy - thin / 2, inner * 2, thin); c.fillRect(cx - thin / 2, cy - inner, thin, inner * 2);
+      for (let i = 1; i <= 5; i++) { const d = i * inner / 5.5; for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d]]) { c.beginPath(); c.arc(cx + dx, cy + dy, 2.4 * k, 0, 7); c.fill(); } }
+      c.fillStyle = '#ff3a2a'; c.shadowColor = '#ff3a2a'; c.shadowBlur = 6 * k; c.beginPath(); c.arc(cx, cy, 1.8 * k, 0, 7); c.fill(); c.shadowBlur = 0;
+    } else if (kind === 'acog') {
+      c.strokeStyle = '#0a0a0a'; c.lineWidth = 1.6 * k;
+      c.beginPath(); c.moveTo(cx - R, cy); c.lineTo(cx - R * 0.22, cy); c.moveTo(cx + R * 0.22, cy); c.lineTo(cx + R, cy); c.stroke();
+      c.beginPath(); c.moveTo(cx, cy + R * 0.05); c.lineTo(cx, cy + R * 0.55); c.stroke();
+      const ticks = [[0.13, 0.08, '4'], [0.22, 0.06, '5'], [0.31, 0.045, '6'], [0.42, 0.03, '8']];
+      c.font = `600 ${11 * k}px Rajdhani, sans-serif`; c.fillStyle = '#0a0a0a'; c.textAlign = 'left';
+      for (const [y, w, lab] of ticks) { c.beginPath(); c.moveTo(cx - R * w, cy + R * y); c.lineTo(cx + R * w, cy + R * y); c.stroke(); c.fillText(lab, cx + R * w + 4 * k, cy + R * y + 4 * k); }
+      c.strokeStyle = '#ff4a26'; c.shadowColor = '#ff4a26'; c.shadowBlur = 8 * k; c.lineWidth = 3 * k; c.lineJoin = 'miter';
+      c.beginPath(); c.moveTo(cx - R * 0.045, cy + R * 0.05); c.lineTo(cx, cy); c.lineTo(cx + R * 0.045, cy + R * 0.05); c.stroke(); c.shadowBlur = 0;
+    } else {
+      c.strokeStyle = 'rgba(10,10,10,0.85)'; c.lineWidth = 1.4 * k; c.fillStyle = 'rgba(10,10,10,0.85)';
+      c.beginPath(); c.moveTo(cx - R * 0.6, cy); c.lineTo(cx + R * 0.6, cy); c.stroke();
+      for (let i = -6; i <= 6; i++) { const x = cx + i * R * 0.1; c.beginPath(); c.moveTo(x, cy - (i % 2 ? 4 : 9) * k); c.lineTo(x, cy); c.stroke(); }
+      c.beginPath(); c.moveTo(cx, cy - R * 0.12); c.lineTo(cx, cy + R * 0.12); c.stroke();
+      c.font = `600 ${11 * k}px Rajdhani, sans-serif`; c.textAlign = 'center'; c.fillText('SPOT [LMB]', cx, cy + R * 0.3);
+    }
+    c.restore();
+    // fade in as the sight comes up
+    const a = Math.min(1, Math.max(0, (p.adsT - 0.9) / 0.1));
+    cv.style.opacity = a;
   }
 
   // ---------- minimap & map ----------
@@ -467,6 +537,10 @@ export class HUD {
       } else if (s.spotUntil > now && s.state === 'alive') {
         const sp = proj(s.pos.x, s.pos.y + s.bodyH + 0.45, s.pos.z);
         if (!sp) continue;
+        // only when you could actually see them: no markers through walls, terrain or smoke
+        const hs = s.hitSpheres(), cp = cam.position, coll = g.world.collision;
+        const seen = (coll.los(cp.x, cp.y, cp.z, hs[0][0], hs[0][1], hs[0][2]) || coll.los(cp.x, cp.y, cp.z, hs[1][0], hs[1][1], hs[1][2])) && coll.softVisibility(cp.x, cp.y, cp.z, hs[1][0], hs[1][1], hs[1][2], now) > 0.1;
+        if (!seen) continue;
         const r = 5 * dpr;
         c.fillStyle = ENEMY;
         c.beginPath(); c.moveTo(sp[0], sp[1] - r); c.lineTo(sp[0] + r, sp[1]); c.lineTo(sp[0], sp[1] + r); c.lineTo(sp[0] - r, sp[1]); c.closePath(); c.fill();

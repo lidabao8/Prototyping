@@ -561,5 +561,139 @@ const brennhof = {
   },
 };
 
-export const MAPS = { greenhollow, kessar: portKessar, ironworks, brennhof };
+// ---------------------------------------------------------------------------------------------
+// Small maps: compact overall footprint
+const outpost = {
+  id: 'outpost', name: 'Outpost Zero',
+  desc: 'A small walled desert base. Barracks rows, a comms tower and a motor pool packed inside a hesco perimeter, with guard towers on every corner.',
+  size: 260, cell: 2, seed: 3131, waterLevel: null, playHalf: 112, biome: 'arid', time: 'noon', flatRoofs: true, cqb: true, small: true,
+  terrainTextures: ['sand', 'drygrass', 'rock', 'asphalt'],
+  palette: { t0: [1.0, 0.9, 0.72], t1: [1.0, 0.92, 0.7], t2: [1.0, 0.92, 0.82], t3: [1.2, 1.2, 1.25], macro: [1.0, 0.85, 0.65] },
+  mapColors: [[200, 182, 140], [168, 150, 104], [150, 136, 118], [110, 110, 112]],
+  wallColors: [0xd9c7a4, 0xcbb38a, 0xe3d3b0, 0xc8c0a8],
+  roofColors: [0xb5a68c],
+  grassColor: [0xa89a5a, 0xb8a868, 0x8f8a4a],
+  trees: { types: ['acacia', 'shrub', 'palm'], weights: [0.4, 0.4, 0.2], scatter: 1 / 5000, bush: 1 / 1500, rock: 1 / 1500 },
+  hq: [{ x: 0, z: -98, r: 16 }, { x: 0, z: 98, r: 16 }],
+  flags: [
+    { id: 'A', name: 'Barracks', x: -40, z: -36, r: 13 },
+    { id: 'B', name: 'Comms Tower', x: 4, z: 4, r: 13 },
+    { id: 'C', name: 'Motor Pool', x: 40, z: 40, r: 13 },
+  ],
+  rivers: [],
+  roads: [{ points: [[0, -120], [0, 120]], width: 6 }, { points: [[-120, 0], [120, 0]], width: 6 }],
+  height(x, z, n, n2) {
+    let h = 3 + 0.5 * n.fbm(x / 60, z / 60, 3);
+    const e = Math.max(Math.abs(x), Math.abs(z));
+    h += smoothstep(100, 128, e) * (9 + 3 * n2.fbm(x / 25, z / 25, 2));
+    return h;
+  },
+  splat(x, z, h, slope, road, riverD, n, pad) {
+    const rock = smoothstep(0.2, 0.36, slope);
+    const asphalt = road * 1.6 + (pad ? 0.4 : 0);
+    const dry = smoothstep(0.2, 0.6, n(x / 30, z / 30)) * 0.7;
+    return [Math.max(0.15, 1 - rock - asphalt - dry * 0.5), dry, rock, asphalt];
+  },
+  grassDensity(x, z, h, slope, road, riverD, n, w) { return clamp((w[1] / (w[0] + w[1] + w[2] + w[3])) * (1 - road) * 0.8, 0, 0.7); },
+  layout(L) {
+    const F = this.flags, rng = L.rng;
+    L.hq(0); L.hq(1);
+    // hesco perimeter with gates
+    for (let i = -80; i <= 80; i += 4) {
+      if (Math.abs(i) > 8) { L.p('hesco', i, -80, 0, { n: 3 }); L.p('hesco', i, 80, 0, { n: 3 }); L.p('hesco', -80, i, 1, { n: 3 }); L.p('hesco', 80, i, 1, { n: 3 }); }
+    }
+    for (const [x, z] of [[-76, -76], [76, -76], [-76, 76], [76, 76]]) L.p('watchtower', x, z, 0, {}, 2, 2);
+    // A barracks rows
+    const A = F[0];
+    for (let r = -1; r <= 1; r++) L.b('house', A.x + r * 14, A.z - 4, 1, { cat: 'concrete', flat: true, w: 6, d: 2, noInterior: true, gap: 1 }, true);
+    L.p('sandbags', A.x, A.z + 12, 0, { n: 4 }, 2.1, 0.4); L.p('sandbagRing', A.x - 18, A.z + 14, 0, {}, 2.5, 2);
+    L.p('crateStack', A.x + 18, A.z + 12, 0, {}, 1.3, 0.7);
+    // B comms
+    const B = F[1];
+    L.p('radioTower', B.x + 7, B.z - 7, 0, { h: 26 }, 3, 3);
+    L.b('bunker', B.x - 8, B.z + 6, 0, {}, true);
+    L.p('sandbagRing', B.x + 10, B.z + 10, 2, {}, 2.5, 2); L.p('sandbagRing', B.x - 12, B.z - 10, 0, {}, 2.5, 2);
+    L.p('container', B.x + 18, B.z - 2, 0, {}, 1.3, 3.1); L.p('container', B.x - 20, B.z, 0, { stack: true }, 1.3, 3.1);
+    // C motor pool
+    const C = F[2];
+    L.b('warehouse', C.x, C.z - 6, 0, { w: 7, d: 4, H: 5.5 }, true);
+    for (let i = 0; i < 4; i++) L.p('car', C.x - 12 + i * 8, C.z + 10, 0, { color: [0x6a6a4a, 0x7a7262, 0x5e6b4a, 0x8a8f94][i] }, 1, 2.2);
+    L.p('tank', C.x + 20, C.z - 18, 0, { color: 0xb8b0a0 }, 1.7, 1.7); L.p('barrels', C.x - 18, C.z - 14, 0, {}, 1, 0.4);
+    // cover scattered between objectives
+    const fill = [[-40, 20], [40, -30], [-10, -50], [20, 55], [-55, 50], [55, -55], [-20, 30], [25, -15], [-60, -5], [60, 10]];
+    for (const [x, z] of fill) {
+      const t = rng();
+      if (t < 0.35) L.b(rng() < 0.5 ? 'shop' : 'bunker', x, z, Math.floor(rng() * 4), { w: 3, d: 3, floors: 1, gap: 2 });
+      else if (t < 0.65) { L.p('container', x, z, Math.floor(rng() * 2), { stack: rng() < 0.4 }, 3.2, 3.2); }
+      else { L.p('jersey', x, z, Math.floor(rng() * 2), { n: 2 }, 2.2, 2.2); L.p('crateStack', x + 3, z + 3, 0, {}, 1.3, 0.7); }
+    }
+    L.forests = [];
+    for (const f of F) L.noTree.push({ x: f.x, z: f.z, r: f.r * 1.5 });
+    L.noTree.push({ x: 0, z: 0, r: 85 });
+  },
+};
+
+const frostpine = {
+  id: 'frostpine', name: 'Frostpine',
+  desc: 'A snowed-in mountain village. A timber ski lodge, cabins among snowy pines, a frozen pond in the middle and a sawmill, all within a few hundred metres.',
+  size: 280, cell: 2, seed: 6262, waterLevel: null, playHalf: 122, biome: 'winter', time: 'snow', weather: 'snow', small: true,
+  terrainTextures: ['snow', 'dirt', 'rock', 'ice'],
+  palette: { t0: [1.0, 1.0, 1.0], t1: [0.95, 0.88, 0.82], t2: [0.92, 0.94, 0.98], t3: [1.0, 1.0, 1.0], macro: [0.92, 0.95, 1.0] },
+  mapColors: [[228, 232, 238], [168, 150, 130], [150, 152, 158], [176, 204, 222]],
+  wallColors: [0x8a6a4c, 0x7a5a40, 0x9a7a58, 0x6e5440],
+  roofColors: [0xe6ecf0, 0xdce4ea],
+  grassColor: [0x6a7050, 0x7a8058, 0x8a9060],
+  trees: { types: ['snowpine'], weights: [1], scatter: 1 / 900, bush: 1 / 1400, rock: 1 / 2500 },
+  hq: [{ x: 0, z: -108, r: 16 }, { x: 0, z: 108, r: 16 }],
+  flags: [
+    { id: 'A', name: 'Ski Lodge', x: -42, z: -40, r: 14 },
+    { id: 'B', name: 'Frozen Pond', x: 6, z: 4, r: 15 },
+    { id: 'C', name: 'Sawmill', x: 44, z: 44, r: 14 },
+  ],
+  rivers: [],
+  roads: [{ points: [[0, -130], [-20, -60], [-42, -40], [-20, -10], [6, 4], [30, 25], [44, 44], [20, 90], [0, 130]], width: 5 }],
+  height(x, z, n, n2) {
+    let h = 7 + 3.5 * n.fbm(x / 90, z / 90, 3) + 1.2 * n2.fbm(x / 30, z / 30, 2);
+    h -= 3 * Math.exp(-((x - 6) ** 2 + (z - 4) ** 2) / (2 * 26 * 26));
+    const e = Math.max(Math.abs(x), Math.abs(z));
+    h += smoothstep(105, 138, e) * (16 + 6 * n2.fbm(x / 30, z / 30, 2));
+    return h;
+  },
+  splat(x, z, h, slope, road, riverD, n, pad) {
+    const rock = smoothstep(0.24, 0.42, slope);
+    const ice = 1 - smoothstep(16, 20, Math.hypot(x - 6, z - 4));
+    const dirt = road * 0.9 + (pad ? 0.25 : 0);
+    return [Math.max(0.1, 1.2 - rock - dirt - ice * 2), dirt, rock, ice * 2];
+  },
+  grassDensity() { return 0; },
+  layout(L) {
+    const F = this.flags, rng = L.rng;
+    L.hq(0); L.hq(1);
+    L.flat(6, 4, 20, 20, 8, undefined, true, 0.85);
+    // A ski lodge
+    const A = F[0];
+    L.b('barn', A.x, A.z - 4, 0, { w: 7, d: 5, H: 6, color: 0x7a5a40 }, true);
+    L.b('house2', A.x + 22, A.z + 6, 1, { cat: 'wood', w: 3, d: 4 }); L.b('shed', A.x - 22, A.z + 10, 0, { color: 0x6e5440 });
+    L.p('logs', A.x + 4, A.z + 14, 0, {}, 2.6, 1.3); L.line('fence', A.x - 28, A.z + 22, A.x + 10, A.z + 22);
+    // B frozen pond with a boathouse and jetty cover
+    const B = F[1];
+    L.b('shed', B.x + 22, B.z - 8, 1, { color: 0x6e5440 }); L.p('crateStack', B.x - 18, B.z + 6, 0, {}, 1.3, 0.7);
+    L.p('logs', B.x - 8, B.z - 14, 1, {}, 1.3, 2.6); L.p('logs', B.x + 10, B.z + 16, 0, {}, 2.6, 1.3);
+    L.p('sandbags', B.x, B.z, 0, { n: 3 }, 1.6, 0.4); L.p('haystack', B.x - 20, B.z - 18, 0, {}, 1.3, 0.9);
+    // C sawmill
+    const C = F[2];
+    L.b('warehouse', C.x - 4, C.z - 6, 1, { cat: 'wood', w: 7, d: 4, H: 5, color: 0x7a5a40 }, true);
+    for (let i = 0; i < 4; i++) L.p('logs', C.x + 12, C.z - 14 + i * 7, 1, {}, 1.3, 2.6);
+    L.p('crane', C.x - 18, C.z + 18, 0, {}, 4.4, 1.9); L.b('shed', C.x + 16, C.z + 16, 0, { color: 0x6e5440 });
+    // cabins through the woods
+    const cabins = [[-60, 10], [-30, 40], [30, -40], [60, -10], [-10, 60], [10, -60], [-70, -70], [70, 70], [-60, 60], [60, -60], [-25, -75], [25, 75]];
+    for (const [x, z] of cabins) L.b(rng() < 0.4 ? 'house2' : 'house', x, z, Math.floor(rng() * 4), { cat: 'wood', w: 3, d: 3, gap: 3 });
+    for (let i = 0; i < 8; i++) { const x = (rng() - 0.5) * 180, z = (rng() - 0.5) * 180; L.p(rng() < 0.5 ? 'logs' : 'crateStack', x, z, Math.floor(rng() * 2), {}, 2.6, 2.6); }
+    L.forests = [[-80, 20, 30], [80, -20, 30], [-30, 80, 26], [30, -80, 26], [-85, -85, 22], [85, 85, 22], [60, 40, 14], [-60, -30, 14]];
+    for (const f of F) L.noTree.push({ x: f.x, z: f.z, r: f.r * 1.3 });
+    L.noTree.push({ x: 6, z: 4, r: 24 });
+  },
+};
+
+export const MAPS = { greenhollow, kessar: portKessar, ironworks, brennhof, outpost, frostpine };
 export { coastX };

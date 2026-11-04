@@ -20,8 +20,8 @@ export function buildWeaponGeo(wid, att = {}) {
   const w = WEAPONS[wid];
   const L = w.look || { len: 0.8, color: 0x2a2a2a };
   const c = lift(L.color), c2 = lift(L.color, 0.18), dark = lift(0x1c1c1c), wood = lift(L.wood || L.color, 0.2), metal = lift(0x3a3a3a);
-  const parts = [], mag = [];
-  let sightY = 0.105, muzzleZ, sightZ = -0.05;
+  const parts = [], mag = [], lenses = [];
+  let sightY = 0.105, muzzleZ, sightZ = -0.05, reticleZ = null;
   const magPos = new THREE.Vector3();
   const len = L.len;
   if (w.type === 'pistol') {
@@ -35,7 +35,13 @@ export function buildWeaponGeo(wid, att = {}) {
     mag.push(G.box(0.024, 0.075, 0.034, lift(0x262626), 0, -0.037, 0, 0.22));
     magPos.set(0, -0.025, 0.018);
     muzzleZ = -len * 0.85; sightY = 0.074;
-    if (att.sight === 'reddot') { parts.push(G.box(0.026, 0.028, 0.035, dark, 0, 0.078, -0.03)); sightY = 0.086; }
+    if (att.sight === 'reddot') {
+      parts.push(G.box(0.028, 0.008, 0.036, dark, 0, 0.068, -0.03));
+      parts.push(G.box(0.004, 0.024, 0.008, dark, -0.012, 0.084, -0.042), G.box(0.004, 0.024, 0.008, dark, 0.012, 0.084, -0.042), G.box(0.028, 0.005, 0.008, dark, 0, 0.098, -0.042));
+      parts.push(G.box(0.026, 0.01, 0.014, dark, 0, 0.076, -0.018));
+      lenses.push({ type: 'rect', w: 0.02, h: 0.022, y: 0.085, z: -0.042 });
+      sightY = 0.085; reticleZ = -0.038;
+    }
     if (att.barrel === 'suppressor') { parts.push(G.cyl(0.017, 0.017, 0.13, 8, 0x222222, 0, 0.047, muzzleZ - 0.06, Math.PI / 2)); muzzleZ -= 0.13; }
   } else {
     const isBull = L.stock === 'bullpup';
@@ -89,15 +95,63 @@ export function buildWeaponGeo(wid, att = {}) {
     // sights
     const s = att.sight || 'iron';
     const sz = -0.04;
+    const blk = lift(0x181818, 0.22), od = lift(0x3a3a30, 0.2);
     if (s === 'iron') {
-      parts.push(G.box(0.006, 0.045, 0.006, dark, 0, 0.105, -len * 0.5)); parts.push(G.box(0.02, 0.02, 0.02, dark, 0, 0.088, -len * 0.5));
-      parts.push(G.box(0.01, 0.03, 0.012, dark, -0.012, 0.11, 0.02)); parts.push(G.box(0.01, 0.03, 0.012, dark, 0.012, 0.11, 0.02)); parts.push(G.box(0.034, 0.008, 0.012, dark, 0, 0.098, 0.02));
+      const fz = -len * 0.5;
+      parts.push(G.box(0.02, 0.024, 0.022, dark, 0, 0.094, fz));
+      parts.push(G.box(0.004, 0.02, 0.004, blk, 0, 0.113, fz));
+      parts.push(G.box(0.004, 0.03, 0.014, dark, -0.011, 0.11, fz), G.box(0.004, 0.03, 0.014, dark, 0.011, 0.11, fz));
+      parts.push(G.box(0.03, 0.012, 0.024, dark, 0, 0.1, 0.02));
+      parts.push(G.box(0.006, 0.026, 0.018, dark, -0.015, 0.117, 0.02), G.box(0.006, 0.026, 0.018, dark, 0.015, 0.117, 0.02));
+      parts.push(...G.sleeve(0.009, 0.0042, 0.006, 12, blk, 0, 0.123, 0.02));
+      parts.push(G.box(0.022, 0.006, 0.006, dark, 0, 0.112, 0.02));
       sightY = 0.123; sightZ = 0.02;
-    } else if (s === 'reddot') { parts.push(G.tube(0.021, 0.05, 10, dark, 0, 0.13, sz)); parts.push(G.box(0.02, 0.012, 0.04, dark, 0, 0.104, sz)); parts.push(G.box(0.008, 0.012, 0.012, dark, 0.024, 0.13, sz)); sightY = 0.13; sightZ = sz; }
-    else if (s === 'holo') { parts.push(G.box(0.05, 0.008, 0.07, dark, 0, 0.107, sz)); parts.push(G.box(0.006, 0.045, 0.07, dark, -0.022, 0.13, sz)); parts.push(G.box(0.006, 0.045, 0.07, dark, 0.022, 0.13, sz)); parts.push(G.box(0.05, 0.006, 0.07, dark, 0, 0.153, sz)); sightY = 0.13; sightZ = sz; }
-    else if (s === 'x2') { parts.push(G.tube(0.022, 0.09, 8, dark, 0, 0.13, sz)); parts.push(G.box(0.03, 0.014, 0.06, dark, 0, 0.102, sz)); sightY = 0.13; sightZ = sz; }
-    else if (s === 'acog') { parts.push(G.box(0.044, 0.05, 0.12, 0x3a3a30, 0, 0.13, sz)); parts.push(G.cyl(0.026, 0.026, 0.03, 8, 0x3a3a30, 0, 0.133, sz - 0.07, Math.PI / 2)); parts.push(G.box(0.012, 0.012, 0.02, 0x3a3a30, 0, 0.16, sz)); sightY = 0.133; sightZ = sz; }
-    else if (s === 'scope8') { parts.push(G.cyl(0.02, 0.02, 0.28, 8, dark, 0, 0.14, sz - 0.04, Math.PI / 2)); parts.push(G.cyl(0.03, 0.026, 0.06, 8, dark, 0, 0.14, sz - 0.18, Math.PI / 2)); parts.push(G.cyl(0.026, 0.03, 0.05, 8, dark, 0, 0.14, sz + 0.1, Math.PI / 2)); parts.push(G.box(0.02, 0.03, 0.03, dark, 0, 0.11, sz)); parts.push(G.cyl(0.012, 0.012, 0.03, 6, dark, 0, 0.165, sz - 0.04)); sightY = 0.14; sightZ = sz + 0.1; }
+    } else if (s === 'reddot') {
+      parts.push(G.box(0.022, 0.016, 0.046, dark, 0, 0.104, sz), G.box(0.03, 0.006, 0.05, dark, 0, 0.099, sz));
+      parts.push(...G.sleeve(0.021, 0.0175, 0.052, 14, blk, 0, 0.131, sz));
+      parts.push(...G.sleeve(0.0235, 0.0175, 0.008, 14, blk, 0, 0.131, sz - 0.026));
+      parts.push(...G.sleeve(0.0225, 0.0175, 0.006, 14, blk, 0, 0.131, sz + 0.026));
+      parts.push(G.cyl(0.008, 0.008, 0.012, 8, dark, 0.026, 0.131, sz, 0, 0, Math.PI / 2), G.cyl(0.008, 0.008, 0.012, 8, dark, 0, 0.156, sz));
+      parts.push(G.box(0.006, 0.006, 0.006, 0x993322, 0.033, 0.131, sz));
+      lenses.push({ type: 'circle', r: 0.0175, y: 0.131, z: sz - 0.024 });
+      sightY = 0.131; sightZ = sz; reticleZ = sz - 0.02;
+    } else if (s === 'holo') {
+      parts.push(G.box(0.046, 0.016, 0.09, dark, 0, 0.104, sz + 0.005));
+      parts.push(G.box(0.042, 0.016, 0.03, blk, 0, 0.112, sz + 0.04));
+      parts.push(G.box(0.008, 0.005, 0.006, 0x4a4a4a, -0.012, 0.1125, sz + 0.057), G.box(0.008, 0.005, 0.006, 0x4a4a4a, 0.012, 0.1125, sz + 0.057));
+      parts.push(G.box(0.006, 0.046, 0.034, blk, -0.025, 0.136, sz - 0.018), G.box(0.006, 0.046, 0.034, blk, 0.025, 0.136, sz - 0.018));
+      parts.push(G.box(0.056, 0.007, 0.034, blk, 0, 0.16, sz - 0.018));
+      parts.push(G.box(0.044, 0.004, 0.004, dark, 0, 0.158, sz - 0.034), G.box(0.044, 0.004, 0.004, dark, 0, 0.114, sz - 0.034));
+      lenses.push({ type: 'rect', w: 0.044, h: 0.04, y: 0.136, z: sz - 0.02 });
+      sightY = 0.136; sightZ = sz; reticleZ = sz - 0.016;
+    } else if (s === 'x2') {
+      parts.push(G.box(0.026, 0.014, 0.06, dark, 0, 0.104, sz));
+      parts.push(...G.sleeve(0.02, 0.0165, 0.07, 12, blk, 0, 0.132, sz));
+      parts.push(...G.sleeve(0.024, 0.0165, 0.012, 12, blk, 0, 0.132, sz - 0.038));
+      parts.push(...G.sleeve(0.022, 0.0165, 0.01, 12, blk, 0, 0.132, sz + 0.036));
+      parts.push(G.box(0.02, 0.012, 0.04, blk, 0, 0.157, sz), G.cyl(0.006, 0.006, 0.012, 8, dark, 0.024, 0.132, sz + 0.01, 0, 0, Math.PI / 2));
+      lenses.push({ type: 'circle', r: 0.0165, y: 0.132, z: sz - 0.042 }, { type: 'circle', r: 0.0165, y: 0.132, z: sz + 0.04, back: true });
+      sightY = 0.132; sightZ = sz; reticleZ = sz - 0.03;
+    } else if (s === 'acog') {
+      parts.push(G.box(0.03, 0.014, 0.07, od, 0, 0.104, sz));
+      parts.push(G.cyl(0.018, 0.027, 0.12, 12, od, 0, 0.134, sz, Math.PI / 2));
+      parts.push(...G.sleeve(0.029, 0.023, 0.01, 12, od, 0, 0.134, sz - 0.062));
+      parts.push(G.box(0.012, 0.009, 0.08, 0x2a2a24, 0, 0.162, sz), G.box(0.006, 0.004, 0.06, 0x9a3a2a, 0, 0.167, sz));
+      parts.push(G.cyl(0.007, 0.007, 0.012, 8, od, 0.026, 0.134, sz, 0, 0, Math.PI / 2));
+      lenses.push({ type: 'circle', r: 0.024, y: 0.134, z: sz - 0.067 }, { type: 'circle', r: 0.017, y: 0.134, z: sz + 0.061, back: true });
+      sightY = 0.134; sightZ = sz + 0.06;
+    } else if (s === 'scope8') {
+      const tz = sz - 0.03;
+      parts.push(G.cyl(0.017, 0.017, 0.2, 12, blk, 0, 0.142, tz, Math.PI / 2));
+      parts.push(G.cyl(0.02, 0.032, 0.07, 14, blk, 0, 0.142, tz - 0.135, Math.PI / 2));
+      parts.push(...G.sleeve(0.033, 0.029, 0.01, 14, blk, 0, 0.142, tz - 0.172));
+      parts.push(G.cyl(0.025, 0.019, 0.06, 12, blk, 0, 0.142, tz + 0.13, Math.PI / 2));
+      parts.push(G.cyl(0.024, 0.024, 0.014, 14, lift(0x2a2a2a), 0, 0.142, tz + 0.09, Math.PI / 2));
+      parts.push(G.cyl(0.011, 0.011, 0.03, 10, blk, 0, 0.17, tz), G.cyl(0.011, 0.011, 0.03, 10, blk, 0.03, 0.142, tz, 0, 0, Math.PI / 2));
+      for (const rz of [tz - 0.06, tz + 0.06]) { parts.push(...G.sleeve(0.021, 0.0172, 0.014, 12, dark, 0, 0.142, rz)); parts.push(G.box(0.02, 0.03, 0.014, dark, 0, 0.115, rz)); }
+      lenses.push({ type: 'circle', r: 0.029, y: 0.142, z: tz - 0.176 }, { type: 'circle', r: 0.021, y: 0.142, z: tz + 0.16, back: true });
+      sightY = 0.142; sightZ = tz + 0.16;
+    }
     // barrel attachments
     if (att.barrel === 'suppressor') { parts.push(G.cyl(0.022, 0.022, 0.17, 8, 0x222222, 0, 0.05, muzzleZ - 0.08, Math.PI / 2)); muzzleZ -= 0.17; }
     else if (att.barrel && att.barrel !== 'none') { parts.push(G.cyl(0.018, 0.016, 0.055, 6, 0x262626, 0, 0.05, muzzleZ - 0.02, Math.PI / 2)); muzzleZ -= 0.055; }
@@ -114,7 +168,7 @@ export function buildWeaponGeo(wid, att = {}) {
   const bodyGeo = G.merge(parts);
   const magGeo = mag.length ? G.merge(mag) : null;
   const full = magGeo ? G.merge([bodyGeo.clone(), magGeo.clone().translate(magPos.x, magPos.y, magPos.z)]) : bodyGeo;
-  const res = { geo: full, bodyGeo, magGeo, magPos, sightY, sightZ, muzzle: new THREE.Vector3(0, w.type === 'pistol' ? 0.047 : 0.05, muzzleZ), len, pistol: w.type === 'pistol' };
+  const res = { geo: full, bodyGeo, magGeo, magPos, sightY, sightZ, lenses, reticleZ, muzzle: new THREE.Vector3(0, w.type === 'pistol' ? 0.047 : 0.05, muzzleZ), len, pistol: w.type === 'pistol' };
   geoCache.set(key, res);
   return res;
 }
@@ -268,4 +322,78 @@ export function setRigWeapon(rig, geo, pose = 'rifle') {
     rig.armLMesh.geometry = rig.geos['armL_' + pose];
     rig.weapon.position.set(0.06, -0.11, pose === 'pistol' ? -0.42 : pose === 'gadget' ? -0.3 : -0.33);
   }
+  if (rig.outlined) { refreshRigOutline(rig); if (rig.outlines) for (const o of rig.outlines) o.visible = rig.outlineOn !== false; }
+}
+
+// ---- Enemy outline: inverted hull with smoothed normals, constant on-screen width, depth-tested so
+// walls, terrain and props hide it exactly like they hide the soldier.
+export const outlineMaterial = new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color(1.0, 0.1, 0.06) }, uWidth: { value: 0.0032 } },
+  vertexShader: `
+    uniform float uWidth;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vec3 n = normalize(normalMatrix * normal);
+      float d = clamp(-mv.z, 1.2, 40.0); // constant on screen up close, thinner far away
+      mv.xyz += n * uWidth * d;
+      mv.z -= 0.09; // sit just behind the soldier's own parts so only the silhouette shows
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `uniform vec3 uColor; void main() { gl_FragColor = vec4(uColor, 1.0); }`,
+  side: THREE.BackSide,
+});
+
+const outlineCache = new WeakMap();
+export function outlineGeometry(geo) {
+  if (outlineCache.has(geo)) return outlineCache.get(geo);
+  const pos = geo.attributes.position;
+  const sums = new Map();
+  const key = (i) => `${Math.round(pos.getX(i) * 1e3)},${Math.round(pos.getY(i) * 1e3)},${Math.round(pos.getZ(i) * 1e3)}`;
+  const nrm = geo.attributes.normal;
+  for (let i = 0; i < pos.count; i++) {
+    const k = key(i);
+    const v = sums.get(k) || [0, 0, 0];
+    v[0] += nrm.getX(i); v[1] += nrm.getY(i); v[2] += nrm.getZ(i);
+    sums.set(k, v);
+  }
+  const out = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const v = sums.get(key(i)); const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    out[i * 3] = v[0] / l; out[i * 3 + 1] = v[1] / l; out[i * 3 + 2] = v[2] / l;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', pos);
+  g.setAttribute('normal', new THREE.BufferAttribute(out, 3));
+  if (geo.index) g.setIndex(geo.index);
+  g.boundingSphere = geo.boundingSphere; g.boundingBox = geo.boundingBox;
+  outlineCache.set(geo, g);
+  return g;
+}
+
+function attachOutline(mesh, rig) {
+  if (mesh.userData.outline) { mesh.userData.outline.geometry = outlineGeometry(mesh.geometry); return; }
+  const o = new THREE.Mesh(outlineGeometry(mesh.geometry), outlineMaterial);
+  o.castShadow = false; o.receiveShadow = false; o.renderOrder = 1;
+  o.userData.isOutline = true;
+  mesh.add(o);
+  mesh.userData.outline = o;
+  rig.outlines.push(o);
+}
+
+export function enableRigOutline(rig, on = true) {
+  if (!rig.outlines) {
+    rig.outlines = [];
+    const meshes = [];
+    rig.root.traverse(o => { if (o.isMesh && !o.userData.isOutline) meshes.push(o); });
+    for (const m of meshes) attachOutline(m, rig);
+    rig.outlined = true;
+  }
+  for (const o of rig.outlines) o.visible = on;
+}
+
+export function refreshRigOutline(rig) {
+  if (!rig.outlined) return;
+  const meshes = [];
+  rig.root.traverse(o => { if (o.isMesh && !o.userData.isOutline) meshes.push(o); });
+  for (const m of meshes) attachOutline(m, rig);
 }

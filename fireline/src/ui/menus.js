@@ -68,7 +68,7 @@ export class Menus {
         <div class="mm-rank"><b>RANK ${rank}</b><span>${xp} XP</span></div>
       </div>
       <div class="mm-info">
-        <div><b>4</b><span>maps</span></div><div><b>3</b><span>modes</span></div><div><b>31</b><span>AI soldiers</span></div><div><b>6</b><span>classes</span></div>
+        <div><b>6</b><span>maps</span></div><div><b>3</b><span>modes</span></div><div><b>31</b><span>AI soldiers</span></div><div><b>6</b><span>classes</span></div>
       </div>
       <div class="foot">Every model, texture and sound is generated in code.</div>`);
     s.querySelector('[data-a=play]').onclick = () => this.showSetup();
@@ -85,10 +85,10 @@ export class Menus {
     const s = this.screen('setup', `
       <div class="panel wide">
         <h2>Match setup</h2>
-        <div class="mapcards">${maps.map(m => `<div class="mapcard${cfg.map === m.id ? ' on' : ''}" data-map="${m.id}"><div class="mc-img mc-${m.id}"></div><b>${m.name}</b><span>${m.size}m × ${m.size}m · ${m.biome}</span><p>${m.desc}</p></div>`).join('')}</div>
+        <div class="mapcards">${maps.map(m => `<div class="mapcard${cfg.map === m.id ? ' on' : ''}" data-map="${m.id}"><div class="mc-img mc-${m.id}"></div><b>${m.name}</b><span>${m.playHalf * 2}m play area · ${m.biome}</span><p>${m.desc}</p></div>`).join('')}</div>
         <div class="row3">
           <label>Mode<select data-k="mode">${Object.entries(MODES).map(([k, v]) => `<option value="${k}"${cfg.mode === k ? ' selected' : ''}>${v.name}</option>`).join('')}</select><small class="mdesc"></small></label>
-          <label>Time of day<select data-k="time"><option value="default">Map default</option>${['morning', 'noon', 'afternoon', 'dusk', 'night'].map(t => `<option value="${t}"${cfg.time === t ? ' selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
+          <label>Time of day<select data-k="time"><option value="default">Map default</option>${['morning', 'noon', 'afternoon', 'dusk', 'overcast', 'snow', 'night'].map(t => `<option value="${t}"${cfg.time === t ? ' selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
           <label>Bot difficulty<select data-k="difficulty">${['recruit', 'regular', 'veteran', 'elite'].map(t => `<option value="${t}"${this.app.settings.get('difficulty') === t ? ' selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
           <label>Your team<select data-k="team"><option value="0"${cfg.team === 0 ? ' selected' : ''}>${TEAM_COLORS[0].name}</option><option value="1"${cfg.team === 1 ? ' selected' : ''}>${TEAM_COLORS[1].name}</option></select></label>
           <label>Tickets / kill limit<select data-k="tickets"><option value="0">Mode default</option><option value="150">150</option><option value="250">250</option><option value="400">400</option><option value="600">600</option></select></label>
@@ -273,7 +273,7 @@ export class Menus {
         else if (inp.type === 'range') { v = Number(inp.value); inp.nextElementSibling.textContent = v; }
         else v = inp.value;
         S.set(k, v);
-        if (k === 'preset' && PRESETS[v]) this.showSettings(back);
+        if ((k === 'preset' && PRESETS[v]) || (k === 'trackpadMode' && v)) this.showSettings(back);
         else if (k !== 'preset') { const ps = s.querySelector('[data-k=preset]'); if (ps) ps.value = S.get('preset'); }
       });
     });

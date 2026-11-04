@@ -34,12 +34,18 @@ function treeGeo(type, biome) {
       G.cyl(0.14, 0.24, 3.4, 5, 0x6a5440, 0, 1.7, 0, 0, 0, 0.12), G.cyl(0.1, 0.14, 1.6, 5, 0x6a5440, 0.5, 3.4, 0, 0, 0, -0.5),
       G.ico(2.6, 0, 0x7a8a42, 0.3, 4.3, 0, 1.2, 0.32, 1.1, 0.12, 0.2), G.ico(1.8, 0, 0x6f803b, -1.2, 4.0, 0.5, 1.1, 0.3, 1, 0.12, 0.2),
     ]);
+    case 'snowpine': return G.merge([
+      G.cyl(0.16, 0.28, 3.2, 6, 0x4a3a2c, 0, 1.6, 0),
+      G.cone(2.4, 3.4, 7, 0x2a4636, 0, 3.6, 0, 0.1), G.cone(2.0, 1.2, 7, 0xeef2f6, 0, 4.7, 0, 0.04),
+      G.cone(1.85, 2.9, 7, 0x2e4c3a, 0, 5.4, 0, 0.1), G.cone(1.5, 1.0, 7, 0xeef2f6, 0, 6.3, 0, 0.04),
+      G.cone(1.2, 2.4, 7, 0x32523e, 0, 7.0, 0, 0.1), G.cone(0.75, 1.1, 7, 0xf4f7fa, 0, 7.75, 0, 0.04),
+    ]);
     case 'shrub': return G.merge([G.ico(1.0, 0, 0x7d7d48, 0, 0.6, 0, 1.3, 0.75, 1.2, 0.18, 0.25), G.ico(0.7, 0, 0x8a8a50, 0.6, 0.5, 0.3, 1, 0.8, 1, 0.18, 0.25)]);
   }
 }
 
-const TREE_COLLIDE = { pine: 0.3, oak: 0.38, birch: 0.2, palm: 0.25, acacia: 0.25, shrub: 0 };
-const CANOPY = { pine: [4.8, 2.2], oak: [4.9, 2.6], birch: [5.2, 1.4], palm: [7.2, 2.2], acacia: [4.2, 2.4], shrub: [0.7, 1.1] };
+const TREE_COLLIDE = { snowpine: 0.3, pine: 0.3, oak: 0.38, birch: 0.2, palm: 0.25, acacia: 0.25, shrub: 0 };
+const CANOPY = { snowpine: [4.8, 2.2], pine: [4.8, 2.2], oak: [4.9, 2.6], birch: [5.2, 1.4], palm: [7.2, 2.2], acacia: [4.2, 2.4], shrub: [0.7, 1.1] };
 
 export class Vegetation {
   constructor(world) {
@@ -126,7 +132,7 @@ export class Vegetation {
       }
     }
     if (bushes.length) {
-      const bc = def.biome === 'arid' ? [0x7d7a48, 0x8a8650] : [0x46702e, 0x55803a];
+      const bc = def.biome === 'arid' ? [0x7d7a48, 0x8a8650] : def.biome === 'winter' ? [0x5a6a5c, 0xdfe6ec] : [0x46702e, 0x55803a];
       const geo = G.merge([G.ico(1.0, 0, bc[0], 0, 0.55, 0, 1.3, 0.8, 1.2, 0.2, 0.3), G.ico(0.75, 0, bc[1], 0.55, 0.75, 0.25, 1, 0.9, 1, 0.2, 0.3), G.ico(0.7, 0, bc[0], -0.5, 0.5, -0.3, 1, 0.8, 1, 0.2, 0.3)]);
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
       windPatch(mat, 0.05, 0.2, 1.8);
@@ -154,7 +160,7 @@ export class Vegetation {
       rocks.push([x, h - s * 0.3, z, rng() * 6.28, s]);
     }
     if (rocks.length) {
-      const rc = def.biome === 'arid' ? 0xa8957a : 0x8d8a84;
+      const rc = def.biome === 'arid' ? 0xa8957a : def.biome === 'winter' ? 0x9aa0a6 : 0x8d8a84;
       const geo = G.merge([G.dodeca(1, rc, 0, 0, 0, 1.2, 0.75, 1, 0.15), G.dodeca(0.6, rc, 0.7, -0.1, 0.3, 1, 0.8, 1, 0.15)]);
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
       patchMaterial(mat, 'rock', () => {});

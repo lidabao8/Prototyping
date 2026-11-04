@@ -57,6 +57,8 @@
   .mc-kessar { background: linear-gradient(160deg, #c8b48a 0%, #d6c39a 40%, #b8a07a 60%, #3a7a8a 82%, #2a5a70 100%); }
   .mc-ironworks { background: linear-gradient(160deg, #8a8a86 0%, #6e6a64 35%, #a0603e 52%, #5a5e62 70%, #7a7a74 100%); }
   .mc-brennhof { background: linear-gradient(160deg, #c8a07a 0%, #a85a40 30%, #6e8a4a 48%, #3a6a7a 56%, #d8c8a8 70%, #8a4a3a 100%); }
+  .mc-outpost { background: linear-gradient(160deg, #d8c49a 0%, #c8b48a 40%, #a89a7a 55%, #6a6a6a 62%, #d0bc92 100%); }
+  .mc-frostpine { background: linear-gradient(160deg, #eef2f6 0%, #c8d6e2 35%, #2e4c3a 50%, #b0cce0 62%, #e6ecf0 100%); }
   .controls { max-height: 92vh; overflow-y: auto; }
   .controls .hint { color: var(--dim); margin: -6px 0 10px; font-size: 14px; }
   .bindgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); column-gap: 28px; }
@@ -169,7 +171,7 @@
   .toast b { color: var(--accent); margin-right: 4px; }
   .hudmsg { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; transition: opacity .4s; opacity: 0; background: rgba(0,0,0,0.35); padding: 4px 14px; }
   .orderline { position: absolute; left: 250px; top: 18px; font-size: 14px; letter-spacing: 0.06em; color: #dfe; } .orderline b { color: var(--squad); margin-right: 4px; } .orderline span { color: var(--dim); }
-  .scope { position: absolute; inset: 0; display: none; }
+  .scope, .scopecv { position: absolute; inset: 0; display: none; width: 100%; height: 100%; }
   .scope-ring { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, transparent 0, transparent min(42vh, 42vw), rgba(0,0,0,0.85) calc(min(42vh, 42vw) + 2px), #000 calc(min(42vh, 42vw) + 30px)); }
   .scope-h { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0,0,0,0.85); }
   .scope-v { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(0,0,0,0.85); }

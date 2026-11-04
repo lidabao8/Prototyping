@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { clamp, lerp, damp, DEG } from '../core/math.js';
 import { G } from '../render/geo.js';
 import * as _THREE from 'three';
+const _ae = new _THREE.Vector3();
 const lift = (hx) => new _THREE.Color(hx).lerp(new _THREE.Color(0x7a7a7a), 0.25).getHex();
 import { TEAM_COLORS, buildWeaponGeo, buildGadgetGeo } from './models.js';
 import { keybinds, keyName } from '../core/keybinds.js';
@@ -17,15 +18,40 @@ function limbGeo(ax, ay, az, bx, by, bz, t, color) {
   return g;
 }
 
+const reticleCache = {};
 function reticleTexture(kind) {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
+  if (reticleCache[kind]) return reticleCache[kind];
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d');
-  g.strokeStyle = g.fillStyle = kind === 'holo' ? '#ff4040' : kind === 'chevron' ? '#ff6020' : '#ff2a2a';
-  g.lineWidth = 3;
-  if (kind === 'dot') { g.beginPath(); g.arc(32, 32, 4, 0, 7); g.fill(); }
-  else if (kind === 'holo') { g.beginPath(); g.arc(32, 32, 20, 0, 7); g.stroke(); g.beginPath(); g.arc(32, 32, 3, 0, 7); g.fill(); }
-  else { g.beginPath(); g.moveTo(22, 40); g.lineTo(32, 28); g.lineTo(42, 40); g.stroke(); g.fillRect(31, 27, 2, 2); }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  const col = kind === 'chevron' ? '#ff7a2a' : '#ff3030';
+  g.strokeStyle = g.fillStyle = col; g.shadowColor = col; g.lineCap = 'round';
+  const glow = (blur, fn) => { g.shadowBlur = blur; fn(); g.shadowBlur = 0; fn(); };
+  if (kind === 'dot') glow(14, () => { g.beginPath(); g.arc(128, 128, 9, 0, 7); g.fill(); });
+  else if (kind === 'holo') glow(8, () => {
+    g.lineWidth = 3.5; g.beginPath(); g.arc(128, 128, 46, 0, 7); g.stroke();
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) { g.beginPath(); g.moveTo(128 + dx * 46, 128 + dy * 46); g.lineTo(128 + dx * 58, 128 + dy * 58); g.stroke(); }
+    g.beginPath(); g.arc(128, 128, 4.5, 0, 7); g.fill();
+  });
+  else glow(8, () => {
+    g.lineWidth = 4; g.beginPath(); g.moveTo(104, 150); g.lineTo(128, 124); g.lineTo(152, 150); g.stroke();
+    g.lineWidth = 3; g.beginPath(); g.arc(128, 128, 54, Math.PI * 0.15, Math.PI * 0.85, true); g.stroke();
+    g.beginPath(); g.arc(128, 124, 3, 0, 7); g.fill();
+  });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  reticleCache[kind] = t;
+  return t;
+}
+let lensTex = null;
+function lensTexture() {
+  if (lensTex) return lensTex;
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(S * 0.5, S * 0.5, S * 0.1, S * 0.5, S * 0.5, S * 0.5);
+  grd.addColorStop(0, 'rgba(120,170,220,0.10)'); grd.addColorStop(0.8, 'rgba(90,130,190,0.30)'); grd.addColorStop(1, 'rgba(40,60,90,0.65)');
+  g.fillStyle = grd; g.fillRect(0, 0, S, S);
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 6; g.beginPath(); g.arc(S * 0.5, S * 0.5, S * 0.33, Math.PI * 1.1, Math.PI * 1.45); g.stroke();
+  lensTex = new THREE.CanvasTexture(c); lensTex.colorSpace = THREE.SRGBColorSpace;
+  return lensTex;
 }
 
 export class PlayerController {
@@ -57,7 +83,7 @@ export class PlayerController {
     const key = s.active + ':' + (w.kind === 'gun' ? w.id + JSON.stringify(w.att) : w.id) + ':' + s.team;
     if (key === this.vmKey) return;
     this.vmKey = key;
-    for (const k of ['vmMesh', 'vmMag', 'vmArmR', 'vmArmL', 'reticle']) if (this[k]) { this[k].parent && this[k].parent.remove(this[k]); this[k] = null; }
+    for (const k of ['vmMesh', 'vmMag', 'vmArmR', 'vmArmL', 'reticle', 'vmLenses']) if (this[k]) { this[k].parent && this[k].parent.remove(this[k]); this[k] = null; }
     if (!this.vmArmLGroup) { this.vmArmLGroup = new THREE.Group(); this.vmRoot.add(this.vmArmLGroup); }
     if (!this.vmKnife) {
       this.vmKnife = new THREE.Group();
@@ -75,9 +101,21 @@ export class PlayerController {
       gripL = new THREE.Vector3(0, 0.0, w.stats.type === 'pistol' ? 0.0 : -m.len * 0.42);
       if (w.stats.type === 'pistol') gripL.set(-0.02, -0.04, 0.02);
       this.sightY = m.sightY; this.sightZ = m.sightZ; this.muzzle = m.muzzle.clone();
+      // glass on every optic
+      if (!this.glassMat) this.glassMat = new THREE.MeshStandardMaterial({ map: lensTexture(), transparent: true, depthWrite: false, roughness: 0.05, metalness: 0.85, envMapIntensity: 1.6, side: THREE.DoubleSide });
+      this.vmLenses = new THREE.Group();
+      for (const L of m.lenses || []) {
+        const gl = L.type === 'rect' ? new THREE.PlaneGeometry(L.w, L.h) : new THREE.CircleGeometry(L.r, 20);
+        const lm = new THREE.Mesh(gl, this.glassMat);
+        lm.position.set(0, L.y, L.z); lm.renderOrder = 3; lm.userData.back = !!L.back;
+        this.vmLenses.add(lm);
+      }
+      this.vmRoot.add(this.vmLenses);
       if (w.stats.reticle && !w.stats.scope && w.stats.zoom < 3.5) {
-        const r = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.03), new THREE.MeshBasicMaterial({ map: reticleTexture(w.stats.reticle), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-        r.position.set(0, m.sightY, m.sightZ - 0.03);
+        const rm = new THREE.MeshBasicMaterial({ map: reticleTexture(w.stats.reticle), transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, toneMapped: false });
+        rm.color.setRGB(2.2, 2.2, 2.2);
+        const r = new THREE.Mesh(new THREE.PlaneGeometry(0.024, 0.024), rm);
+        r.position.set(0, m.sightY, m.reticleZ ?? (m.sightZ - 0.03)); r.renderOrder = 4;
         this.reticle = r; this.vmRoot.add(r);
       }
     } else {
@@ -122,8 +160,18 @@ export class PlayerController {
       const g = s.gun;
       const zoom = s.adsT > 0.5 ? (g ? g.stats.zoom : (s.weapon && s.weapon.id === 'binoculars' ? 6 : 1)) : 1;
       const sens = 0.0021 * S.get('sensitivity') * (s.adsT > 0.5 ? S.get('adsSensitivity') / Math.pow(zoom, 0.85) : 1);
-      s.yaw -= inp.mouse.dx * sens;
-      s.pitch -= inp.mouse.dy * sens * (S.get('invertY') ? -1 : 1);
+      // look smoothing (helps trackpads), arrow-key look, aim assist friction
+      const sm = S.get('mouseSmoothing') || 0;
+      this.smx = (this.smx || 0) * sm + inp.mouse.dx * (1 - sm);
+      this.smy = (this.smy || 0) * sm + inp.mouse.dy * (1 - sm);
+      const assist = s.state === 'alive' ? this.aimAssistTarget(dt) : null;
+      const fric = assist ? assist.friction : 1;
+      s.yaw -= this.smx * sens * fric;
+      s.pitch -= this.smy * sens * fric * (S.get('invertY') ? -1 : 1);
+      const kl = (S.get('keyLookSpeed') || 140) * DEG * dt * (s.adsT > 0.5 ? 0.45 : 1);
+      if (keybinds.down(inp, 'lookLeft')) s.yaw += kl; if (keybinds.down(inp, 'lookRight')) s.yaw -= kl;
+      if (keybinds.down(inp, 'lookUp')) s.pitch += kl * 0.7; if (keybinds.down(inp, 'lookDown')) s.pitch -= kl * 0.7;
+      if (assist) this.applyAimPull(assist, dt);
       s.pitch = clamp(s.pitch, s.state === 'downed' ? -0.6 : -1.45, s.state === 'downed' ? 0.6 : 1.45);
     }
     const si = s.input;
@@ -133,7 +181,8 @@ export class PlayerController {
       if (K.down(inp, 'forward')) si.mz -= 1; if (K.down(inp, 'back')) si.mz += 1;
       if (K.down(inp, 'left')) si.mx -= 1; if (K.down(inp, 'right')) si.mx += 1;
       const sprintKey = K.down(inp, 'sprint');
-      si.sprint = sprintKey && !(s.adsT > 0.5);
+      si.sprint = (sprintKey || (S.get('autoSprint') && si.mz < -0.5 && Math.abs(si.mx) < 0.5)) && !(s.adsT > 0.5) && !si.ads;
+      s.autoRepeat = !!S.get('semiAutoRepeat');
       if (K.hit(inp, 'jump')) si.jump = true;
       const crouchHit = K.hit(inp, 'crouch'), crouchHoldHit = K.hit(inp, 'crouchHold');
       const holdMode = S.get('crouchMode') === 'hold';
@@ -199,6 +248,62 @@ export class PlayerController {
       else this.giveUpT = 0;
     }
     if (ui) { ui.giveUp = this.giveUpT / 1.5; }
+  }
+
+  // ---- aim assist: only onto enemies that are actually visible ----
+  aimAssistTarget(dt) {
+    const S = this.game.settings, level = S.get('aimAssist');
+    if (!level || level === 'off') return null;
+    const cfg = { low: { cone: 2.4, fric: 0.3, pull: 1.4, snap: 0.35 }, medium: { cone: 3.8, fric: 0.45, pull: 2.6, snap: 0.55 }, high: { cone: 5.5, fric: 0.6, pull: 4.2, snap: 0.75 } }[level];
+    if (!cfg) return null;
+    const s = this.s, g = this.game;
+    if (!s.gun || s.sprinting) return null;
+    const eye = s.eye(_ae), cp = Math.cos(s.pitch);
+    const dx0 = -Math.sin(s.yaw) * cp, dy0 = Math.sin(s.pitch), dz0 = -Math.cos(s.yaw) * cp;
+    this._aaT = (this._aaT || 0) - dt;
+    const ads = s.adsT > 0.5;
+    let best = null, bestScore = 1e9;
+    for (const e of g.teams[1 - s.team]) {
+      if (e.state !== 'alive') continue;
+      const hs = e.hitSpheres(), c = hs[1];
+      const tx = c[0] - eye.x, ty = c[1] - eye.y, tz = c[2] - eye.z;
+      const d = Math.hypot(tx, ty, tz);
+      if (d > (ads ? 160 : 70) || d < 0.5) continue;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (tx * dx0 + ty * dy0 + tz * dz0) / d))) / DEG;
+      const cone = cfg.cone * Math.max(0.6, Math.min(2.2, 25 / d)) * (ads ? 1.2 : 1);
+      if (ang > cone * 1.7) continue;
+      const score = ang / cone;
+      if (score < bestScore) { bestScore = score; best = { e, ang, cone, d, x: c[0], y: c[1], z: c[2] }; }
+    }
+    if (!best) { this.aaTarget = null; return null; }
+    // visibility check (cached briefly per target)
+    if (this.aaTarget !== best.e || this._aaT <= 0) {
+      const hs = best.e.hitSpheres(), coll = g.world.collision;
+      const vis = (coll.los(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2]) || coll.los(eye.x, eye.y, eye.z, hs[0][0], hs[0][1], hs[0][2])) && coll.softVisibility(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2], g.time) > 0.25;
+      this.aaVisible = vis; this.aaTarget = best.e; this._aaT = 0.12;
+    }
+    if (!this.aaVisible) return null;
+    const inCone = best.ang < best.cone;
+    best.friction = inCone ? 1 - cfg.fric * (1 - best.ang / best.cone) : 1;
+    best.cfg = cfg; best.inCone = inCone;
+    return best;
+  }
+
+  applyAimPull(t, dt) {
+    const s = this.s;
+    const eye = s.eye(_ae);
+    const dx = t.x - eye.x, dy = t.y - eye.y, dz = t.z - eye.z;
+    const wantYaw = Math.atan2(-dx, -dz), wantPitch = Math.atan2(dy, Math.hypot(dx, dz));
+    let dyaw = wantYaw - s.yaw; while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    const dp = wantPitch - s.pitch;
+    // snap when aiming down sights onto a nearby target
+    if (s.adsT > 0.3 && !this.wasAds && t.ang < t.cone * 1.6) { s.yaw += dyaw * t.cfg.snap; s.pitch += dp * t.cfg.snap; }
+    this.wasAds = s.adsT > 0.3;
+    if (!t.inCone) return;
+    // gentle pull, stronger while aiming down sights or moving relative to the target
+    const rel = Math.hypot(s.vel.x - t.e.vel.x, s.vel.z - t.e.vel.z);
+    const k = 1 - Math.exp(-t.cfg.pull * dt * (s.adsT > 0.5 ? 1 : 0.5) * (0.4 + Math.min(1, rel / 3)));
+    s.yaw += dyaw * k; s.pitch += dp * k * 0.6;
   }
 
   toggleLight() {
@@ -310,7 +415,8 @@ export class PlayerController {
     const hfov = S.get('fov') * DEG;
     const aspect = cam.aspect;
     const vfov = 2 * Math.atan(Math.tan(hfov / 2) / aspect) / DEG;
-    cam.fov = vfov / z * (s.sprinting ? 1.06 : 1);
+    this.sprintFov = damp(this.sprintFov || 1, s.sprinting ? 1.06 : 1, 6, dt);
+    cam.fov = vfov / z * this.sprintFov;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
     // flashlight
@@ -329,7 +435,8 @@ export class PlayerController {
     if (!vm.visible) { this.updateMuzzleWorld(); return; }
     const w = s.weapon;
     const isGun = w && w.kind === 'gun';
-    const ads = isGun ? s.adsT : 0;
+    const adsRaw = isGun ? s.adsT : 0;
+    const ads = adsRaw * adsRaw * (3 - 2 * adsRaw); // eased in/out
     // sway from mouse
     const mdx = game.input.mouse.dx, mdy = game.input.mouse.dy;
     this.swayX = damp(this.swayX, clamp(-mdx * 0.0006, -0.05, 0.05), 10, dt);
@@ -346,7 +453,11 @@ export class PlayerController {
     // breathing
     const tb = game.time;
     p.y += Math.sin(tb * 1.6) * 0.0025 * (1 - ads * 0.7);
-    if (s.sprinting) { p.x += 0.03; p.y -= 0.06; rx -= 0.35; ry += 0.65; }
+    this.sprintBlend = damp(this.sprintBlend || 0, s.sprinting ? 1 : 0, 9, dt);
+    const sb = this.sprintBlend;
+    if (sb > 0.001) { p.x += 0.03 * sb; p.y -= 0.06 * sb; rx -= 0.35 * sb; ry += 0.65 * sb; p.y += Math.sin(this.bobPhase * 2) * 0.012 * sb; }
+    this.crouchBlend = damp(this.crouchBlend || 0, s.stance === 'stand' ? 0 : 1, 7, dt);
+    p.y += 0.008 * this.crouchBlend; rz += 0.04 * this.crouchBlend * (1 - ads);
     // reload: tilt the weapon, drop the magazine, bring a fresh one up with the left hand
     let magOff = null, armOff = null;
     if (s.reloadT > 0 && isGun) {
@@ -410,8 +521,11 @@ export class PlayerController {
       const kickZ = (w.stats.type === 'sniper' || w.stats.type === 'shotgun' ? 0.09 : 0.035) * this.kick;
       p.z += kickZ; rx += this.kick * (w.stats.type === 'sniper' ? 0.12 : 0.04) * (1 - ads * 0.5);
     }
-    vm.position.lerp(p, 1 - Math.exp(-dt * 30));
-    vm.rotation.set(rx, ry, rz + s.lean * 0.06);
+    // springy follow: fast enough to feel responsive, slow enough that nothing snaps
+    const kp = 1 - Math.exp(-dt * (ads > 0.5 ? 26 : 16)), kr = 1 - Math.exp(-dt * 14);
+    vm.position.lerp(p, kp);
+    const tz = rz + s.lean * 0.06;
+    vm.rotation.x += (rx - vm.rotation.x) * kr; vm.rotation.y += (ry - vm.rotation.y) * kr; vm.rotation.z += (tz - vm.rotation.z) * kr;
     if (this.reticle) this.reticle.visible = ads > 0.85;
     // match lighting to world sun in camera space
     const sun = game.env.sunDir.clone().transformDirection(this.camera.matrixWorldInverse);

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, damp, rand, wrapAngle } from '../core/math.js';
 import { weaponStats, GADGETS, CLASSES, WEAPONS } from '../data/loadout.js';
-import { buildSoldier, buildWeaponGeo, buildGadgetGeo, setRigWeapon } from './models.js';
+import { buildSoldier, buildWeaponGeo, buildGadgetGeo, setRigWeapon, enableRigOutline } from './models.js';
 
 const STANCE = {
   stand: { h: 1.8, eye: 1.62, speed: 4.3 },
@@ -60,6 +60,10 @@ export class Soldier {
     this.rigCls = this.cls;
     this.rig.root.visible = !this.isPlayer;
     this.game.scene.add(this.rig.root);
+    if (this.game.player && this.team !== this.game.player.team || (!this.game.player && this.team !== (this.game.config.team ?? 0))) {
+      this.rig.outlineOn = this.game.settings.get('enemyOutline') !== false;
+      enableRigOutline(this.rig, this.rig.outlineOn);
+    }
   }
 
   setLoadout(lo) {
@@ -124,6 +128,13 @@ export class Soldier {
 
   // [x,y,z,r,part]
   hitSpheres() {
+    if (this.rigHS && this.state !== 'dead' && this.game.frame - this.rigHSFrame < 6) {
+      const S = this._hs || (this._hs = [[0, 0, 0, 0, 'head'], [0, 0, 0, 0, 'body'], [0, 0, 0, 0, 'body'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg']]);
+      const dx = this.pos.x - this.rigHSPos.x, dy = this.pos.y - this.rigHSPos.y, dz = this.pos.z - this.rigHSPos.z;
+      const R = this.rigHS;
+      for (let i = 0; i < 7; i++) { S[i][0] = R[i * 4] + dx; S[i][1] = R[i * 4 + 1] + dy; S[i][2] = R[i * 4 + 2] + dz; S[i][3] = R[i * 4 + 3]; }
+      return S;
+    }
     const p = this.pos, f = this.forward(_f), r = this.right(_r);
     const L = this.lean * 0.5;
     const S = this._hs || (this._hs = [[0, 0, 0, 0, 'head'], [0, 0, 0, 0, 'body'], [0, 0, 0, 0, 'body'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg'], [0, 0, 0, 0, 'leg']]);
@@ -133,10 +144,10 @@ export class Soldier {
       set(0, 0.78 * k, 0.28, 0, 0.14); set(1, 0.42 * k, 0.24, 0, 0.22); set(2, 0.05 * k, 0.22, 0, 0.21);
       set(3, -0.4 * k, 0.15, -0.12, 0.13); set(4, -0.4 * k, 0.15, 0.12, 0.13); set(5, -0.8 * k, 0.13, -0.12, 0.12); set(6, -0.8 * k, 0.13, 0.12, 0.12);
     } else if (this.stance === 'crouch') {
-      set(0, 0.04, 1.22, L * 1.2, 0.14); set(1, 0.02, 0.96, L, 0.24); set(2, 0, 0.72, L * 0.5, 0.22);
-      set(3, -0.15, 0.48, -0.12, 0.14); set(4, 0.15, 0.48, 0.12, 0.14); set(5, -0.25, 0.2, -0.12, 0.13); set(6, 0.25, 0.2, 0.12, 0.13);
+      set(0, 0.04, 1.34, L * 1.2, 0.15); set(1, 0.02, 1.0, L, 0.23); set(2, 0, 0.77, L * 0.5, 0.2);
+      set(3, 0.2, 0.5, 0.1, 0.12); set(4, -0.05, 0.42, -0.1, 0.12); set(5, 0.38, 0.22, 0.1, 0.11); set(6, -0.3, 0.12, -0.1, 0.11);
     } else {
-      set(0, 0.02, 1.66, L * 1.2, 0.14); set(1, 0, 1.36, L, 0.24); set(2, 0, 1.06, L * 0.5, 0.22);
+      set(0, 0.02, 1.69, L * 1.2, 0.15); set(1, 0, 1.36, L, 0.23); set(2, 0, 1.1, L * 0.5, 0.2);
       set(3, 0, 0.72, -0.1, 0.14); set(4, 0, 0.72, 0.1, 0.14); set(5, 0, 0.3, -0.1, 0.13); set(6, 0, 0.3, 0.1, 0.13);
     }
     return S;
@@ -311,14 +322,19 @@ export class Soldier {
     const g = this.gun;
     if (!g) return 2;
     const s = g.stats;
-    const hip = s.spreadHip * s.hipMul;
-    let base = lerp(hip, s.spreadAds, this.adsT);
     const hs = Math.hypot(this.vel.x, this.vel.z);
-    base *= 1 + Math.min(1.5, hs / 4.3) * (this.adsT > 0.5 ? 0.6 : 0.9);
+    const mv = Math.min(1.5, hs / 4.3);
+    // hip fire: unchanged from before
+    const hipS = s.spreadHip * s.hipMul * (1 + mv * 0.9);
+    // aimed fire: tighter, smaller movement penalty, precise first shot from a still stance
+    let adsS = s.spreadAds * 0.55 * (1 + mv * 0.35);
+    if (this.burst <= 1 && hs < 0.5) adsS *= 0.35;
+    const a = this.adsT * this.adsT * (3 - 2 * this.adsT);
+    let base = lerp(hipS, adsS, a);
     if (this.stance === 'crouch') base *= 0.8;
     else if (this.stance === 'prone') base *= 0.6;
     if (!this.move.grounded) base *= 2.5;
-    base += this.bloom * (this.adsT > 0.5 ? 0.35 : 1);
+    base += this.bloom * lerp(1, 0.18, a);
     if (Math.abs(this.lean) > 0.5 && this.adsT > 0.5) base *= 0.85; // braced against cover
     if (s.type === 'sniper' && this.adsT > 0.95) base = 0.0;
     return base;
@@ -370,7 +386,7 @@ export class Soldier {
     const rec = Math.min(1, dt * 7);
     const rp = this.recoilPitch * rec, ry = this.recoilYaw * rec;
     this.recoilPitch -= rp; this.recoilYaw -= ry;
-    if (!this.triggerHeld || this.fireCd < -0.1) { this.pitch -= rp * 0.55; this.yaw -= ry * 0.4; }
+    if (!this.triggerHeld || this.fireCd < -0.1) { const ar = this.adsT > 0.5; this.pitch -= rp * (ar ? 0.7 : 0.55); this.yaw -= ry * (ar ? 0.6 : 0.4); }
     if (!g) { this.triggerHeld = this.input.fire; return false; }
     const s = g.stats;
     const mode = s.modes[g.mode] || 'auto';
@@ -379,7 +395,7 @@ export class Soldier {
     if (this.input.fire && g.stats.shellReload && this.reloadT > 0 && g.mag > 0) this.reloadT = 0;
     if (!this.input.fire) { this.burst = 0; return false; }
     if (!this.canFire()) return false;
-    if (mode !== 'auto' && !pressed) return false;
+    if (mode !== 'auto' && !pressed && !(this.autoRepeat && mode === 'semi')) return false;
     if (this.fireCd > 0) return false;
     if (g.mag <= 0) {
       if (pressed) this.game.onDryFire(this);
@@ -396,8 +412,14 @@ export class Soldier {
     for (let i = 0; i < pellets; i++) this.game.combat.fireBullet(this, g, i);
     // recoil
     const rf = this.recoilFactor();
-    const kickV = s.recoilV * s.recoilVMul * rf * (this.burst > 1 ? 1 : 1.25);
-    const kickH = (Math.random() - 0.5) * 2 * s.recoilH * s.recoilHMul * rf;
+    const n = this.burst;
+    const seed = (s.rpm % 7) + s.mag * 0.13;
+    const aimed = this.adsT > 0.5;
+    // aimed: learnable pattern with a little randomness; hip: the original random kick
+    const kickV = aimed ? s.recoilV * s.recoilVMul * rf * (n > 1 ? 1 - Math.min(0.25, n * 0.015) : 1.15) * (0.92 + Math.random() * 0.16)
+      : s.recoilV * s.recoilVMul * rf * (n > 1 ? 1 : 1.25);
+    const kickH = aimed ? (Math.sin(n * 0.55 + seed) * 0.75 + (Math.random() - 0.5) * 0.5) * s.recoilH * s.recoilHMul * rf
+      : (Math.random() - 0.5) * 2 * s.recoilH * s.recoilHMul * rf;
     this.pitch += kickV * Math.PI / 180;
     this.yaw -= kickH * Math.PI / 180;
     this.recoilPitch += kickV * Math.PI / 180; this.recoilYaw -= kickH * Math.PI / 180;
@@ -559,6 +581,7 @@ export class Soldier {
     if (!rig) return;
     if (this.isPlayer) { rig.root.visible = false; return; }
     if (this.state === 'dead' && this.deadTime > 25) { rig.root.visible = false; return; }
+    if (rig.outlines) { const on = rig.outlineOn !== false && this.state !== 'dead'; if (on !== rig._olv) { rig._olv = on; for (const o of rig.outlines) o.visible = on; } }
     rig.root.visible = true;
     const d2 = (this.pos.x - camPos.x) ** 2 + (this.pos.z - camPos.z) ** 2;
     const far = d2 > 160 * 160;
@@ -587,7 +610,9 @@ export class Soldier {
     if (hs < 0.4 && Math.abs(yawRate) > 1.2 && this.state === 'alive' && this.stance !== 'prone') { A.shuffle = Math.min(1, A.shuffle + dt * 6); A.phase += dt * 7; }
     else A.shuffle = Math.max(0, A.shuffle - dt * 4);
     const s = Math.sin(A.phase), c = Math.cos(A.phase);
-    const amp = Math.max(Math.min(1, hs / (this.sprinting ? 6 : this.stance === 'crouch' ? 2.4 : 4)), A.shuffle * 0.35);
+    const ampT = Math.max(Math.min(1, hs / (this.sprinting ? 6 : this.stance === 'crouch' ? 2.4 : 4)), A.shuffle * 0.35);
+    A.amp = damp(A.amp ?? ampT, ampT, 8, dt);
+    const amp = A.amp;
     // targets
     let bodyY = 0.95, bodyRX = 0, bodyRZ = 0, bodyX = this.lean * 0.12;
     let spineRX = this.pitch * 0.25, spineRY = -A.legYaw * 0.85, spineRZ = -this.lean * 0.42;
@@ -665,13 +690,20 @@ export class Soldier {
       const since = t - this.lastShotTime;
       if (since < 0.08) { wZ += 0.05 * (1 - since / 0.08); aimRX += 0.04 * (1 - since / 0.08); }
     }
-    const k = 1 - Math.exp(-dt * (this.state === 'dead' ? 30 : 15));
+    // per-channel blend rates: legs settle quickly, the body and spine ease between stances
+    const kFast = 1 - Math.exp(-dt * (this.state === 'dead' ? 26 : 16));
+    const kMid = 1 - Math.exp(-dt * (this.state === 'dead' ? 22 : 10));
+    const kSlow = 1 - Math.exp(-dt * (this.state === 'dead' ? 18 : 7));
+    let k = kFast;
     const ap = (o, prop, v) => { o[prop] += (v - o[prop]) * k; };
+    k = kSlow;
     ap(rig.body.position, 'y', bodyY); ap(rig.body.position, 'x', bodyX);
     ap(rig.body.rotation, 'x', bodyRX); ap(rig.body.rotation, 'z', bodyRZ);
+    k = kMid;
     ap(rig.pelvis.rotation, 'y', A.legYaw * (this.stance === 'prone' || this.state !== 'alive' ? 0 : 1));
     ap(rig.spine.rotation, 'x', spineRX); ap(rig.spine.rotation, 'y', spineRY); ap(rig.spine.rotation, 'z', spineRZ);
     ap(rig.head.rotation, 'x', headRX);
+    k = kFast;
     ap(rig.aim.rotation, 'x', aimRX); ap(rig.aim.rotation, 'y', aimRY);
     ap(rig.armR.rotation, 'x', armRX); ap(rig.armR.rotation, 'z', armRZ);
     ap(rig.armL.rotation, 'x', armLX); ap(rig.armL.rotation, 'z', armLZ);
@@ -683,6 +715,14 @@ export class Soldier {
     ap(L[0].thigh.rotation, 'z', tLz); ap(L[1].thigh.rotation, 'z', tRz);
     ap(L[0].shin.rotation, 'x', kL); ap(L[1].shin.rotation, 'x', kR);
     if (this.state !== 'dead') A.death = null;
+    // hitboxes follow the animated skeleton
+    rig.root.updateMatrixWorld(true);
+    const R = this.rigHS || (this.rigHS = new Float32Array(28));
+    const put = (i, obj, x, y, z, rad) => { _hv.set(x, y, z); obj.localToWorld(_hv); R[i * 4] = _hv.x; R[i * 4 + 1] = _hv.y; R[i * 4 + 2] = _hv.z; R[i * 4 + 3] = rad; };
+    put(0, rig.head, 0, 0.14, 0, 0.15); put(1, rig.spine, 0, 0.33, 0, 0.23); put(2, rig.spine, 0, 0.09, 0, 0.2);
+    put(3, L[0].thigh, 0, -0.22, 0, 0.12); put(4, L[1].thigh, 0, -0.22, 0, 0.12); put(5, L[0].shin, 0, -0.24, 0, 0.11); put(6, L[1].shin, 0, -0.24, 0, 0.11);
+    this.rigHSPos = (this.rigHSPos || new THREE.Vector3()).copy(this.pos);
+    this.rigHSFrame = this.game.frame;
   }
 
   muzzleWorld(out = new THREE.Vector3()) {
@@ -698,6 +738,6 @@ export class Soldier {
   removeFromScene() { if (this.rig) this.game.scene.remove(this.rig.root); }
 }
 
-const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _zero = new THREE.Vector3();
+const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _zero = new THREE.Vector3(), _hv = new THREE.Vector3();
 export { STANCE };
 void wrapAngle; void rand; void WEAPONS;

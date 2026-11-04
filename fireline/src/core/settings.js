@@ -32,7 +32,7 @@ export const DEFAULTS = Object.assign({
   preset: 'high',
   fov: 95, sensitivity: 1.0, adsSensitivity: 0.85, invertY: false,
   volume: 0.8, musicVolume: 0.5, showFps: true, screenShake: true, headBob: true,
-  difficulty: 'veteran', crosshair: true, nameTags: true, crouchMode: 'toggle', adsMode: 'hold', leanMode: 'hold', hitmarkerSound: true,
+  difficulty: 'veteran', crosshair: true, nameTags: true, enemyOutline: true, aimAssist: 'low', mouseSmoothing: 0, keyLookSpeed: 140, autoSprint: false, semiAutoRepeat: false, trackpadMode: false, crouchMode: 'toggle', adsMode: 'hold', leanMode: 'hold', hitmarkerSound: true,
 }, PRESETS.high);
 
 // Describes the settings UI. type: bool | select | range
@@ -73,7 +73,16 @@ export const SETTINGS_SCHEMA = [
   { key: 'difficulty', label: 'Bot difficulty', type: 'select', options: ['recruit', 'regular', 'veteran', 'elite'] },
   { key: 'crosshair', label: 'Crosshair', type: 'bool' },
   { key: 'nameTags', label: 'Friendly name tags', type: 'bool' },
+  { key: 'enemyOutline', label: 'Red outline on visible enemies', type: 'bool' },
   { group: 'Controls & audio' },
+  { group: 'Trackpad & accessibility' },
+  { key: 'trackpadMode', label: 'Trackpad mode (applies the options below)', type: 'bool', hint: 'aim assist high, toggle aim/crouch/lean, smoothing, auto-sprint, hold-to-fire' },
+  { key: 'aimAssist', label: 'Aim assist', type: 'select', options: ['off', 'low', 'medium', 'high'], hint: 'slows and nudges your aim onto enemies you can see' },
+  { key: 'mouseSmoothing', label: 'Look smoothing', type: 'range', min: 0, max: 0.8, step: 0.05 },
+  { key: 'keyLookSpeed', label: 'Arrow-key look speed (°/s)', type: 'range', min: 40, max: 360, step: 10 },
+  { key: 'autoSprint', label: 'Auto-sprint when moving forward', type: 'bool' },
+  { key: 'semiAutoRepeat', label: 'Hold to keep firing semi-auto weapons', type: 'bool' },
+  { group: 'Mouse & keys' },
   { key: 'sensitivity', label: 'Mouse sensitivity', type: 'range', min: 0.1, max: 3, step: 0.05 },
   { key: 'adsSensitivity', label: 'ADS sensitivity', type: 'range', min: 0.2, max: 1.5, step: 0.05 },
   { key: 'invertY', label: 'Invert Y', type: 'bool' },
@@ -97,6 +106,7 @@ class Settings {
   set(k, v) {
     this.values[k] = v;
     if (k === 'preset' && PRESETS[v]) Object.assign(this.values, PRESETS[v]);
+    if (k === 'trackpadMode' && v) Object.assign(this.values, { aimAssist: 'high', adsMode: 'toggle', crouchMode: 'toggle', leanMode: 'toggle', mouseSmoothing: 0.35, autoSprint: true, semiAutoRepeat: true, sensitivity: Math.max(this.values.sensitivity, 1.3) });
     else if (k in PRESETS.high && k !== 'preset') this.values.preset = 'custom';
     this.save();
     for (const l of this.listeners) l(k, v);
