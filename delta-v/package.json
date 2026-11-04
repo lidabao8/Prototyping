@@ -1,0 +1,16 @@
+{
+  "name": "delta-v",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DELTA-V - zero-g team deathmatch FPS with realistic RCS flight and AI bots",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=dist/delta-v.js",
+    "build:dev": "esbuild src/main.js --bundle --sourcemap --format=iife --target=es2020 --outfile=dist/delta-v.js",
+    "watch": "esbuild src/main.js --bundle --sourcemap --format=iife --target=es2020 --outfile=dist/delta-v.js --watch",
+    "serve": "python3 -m http.server 8081"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "three": "0.170.0"
+  }
+}

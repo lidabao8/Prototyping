@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DELTA-V</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#02030a; --panel:rgba(10,14,20,0.86); --line:rgba(159,232,255,0.18); --text:#e9eef2; --dim:#93a0ab; --hud:#9fe8ff; --accent:#ffcc4d; --blue:#3f8cff; --orange:#ff8a2a; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:'Rajdhani','Bahnschrift','Segoe UI',Arial,sans-serif; user-select:none; }
+  #game { position:fixed; inset:0; display:block; outline:none; }
+  #hud { position:fixed; inset:0; pointer-events:none; }
+  #visor { position:fixed; inset:0; pointer-events:none; background:radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 62%, rgba(0,6,14,0.55) 100%); }
+  .screen { position:fixed; inset:0; display:none; align-items:center; justify-content:center; padding:16px; overflow-y:auto; }
+  #menu { display:flex; background:linear-gradient(90deg, rgba(2,4,10,0.92) 0%, rgba(2,4,10,0.7) 45%, rgba(2,4,10,0.15) 100%); justify-content:flex-start; padding-left:max(16px,5vw); }
+  #menu .card { margin:auto auto auto 0; }
+  .card { background:var(--panel); border:1px solid var(--line); padding:20px 24px; max-width:600px; width:100%; margin:auto; }
+  h1 { margin:0; font-size:clamp(44px,8vw,84px); letter-spacing:0.12em; line-height:0.95; }
+  h1 span { color:var(--hud); }
+  .sub { color:var(--dim); letter-spacing:0.32em; font-size:13px; margin:6px 0 18px; text-transform:uppercase; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px 16px; margin:12px 0; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--dim); letter-spacing:0.12em; text-transform:uppercase; }
+  select, input[type=range] { width:100%; }
+  select { background:#0d131b; color:var(--text); border:1px solid var(--line); padding:6px; font-family:inherit; font-size:15px; }
+  input[type=range] { accent-color:var(--hud); }
+  .val { color:var(--text); }
+  .desc { font-size:13px; color:var(--hud); min-height:34px; margin:4px 0 10px; }
+  button { background:var(--hud); color:#021018; border:0; padding:12px 26px; font-family:inherit; font-weight:700; font-size:18px; letter-spacing:0.18em; cursor:pointer; }
+  button.alt { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button:hover { filter:brightness(1.15); }
+  .keys { display:grid; grid-template-columns:auto 1fr auto 1fr; gap:2px 12px; font-size:12.5px; color:var(--dim); margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
+  .keys b { color:var(--text); font-weight:700; white-space:nowrap; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  #pause, #end { background:rgba(2,4,10,0.7); }
+  #board { position:fixed; inset:0; display:none; align-items:center; justify-content:center; gap:16px; pointer-events:none; flex-wrap:wrap; padding:16px; }
+  .bteam { background:var(--panel); border-top:3px solid var(--tc); min-width:280px; padding:10px 14px; }
+  .bhead { display:flex; justify-content:space-between; font-size:20px; color:var(--tc); margin-bottom:6px; }
+  table { width:100%; border-collapse:collapse; font-size:15px; }
+  th { text-align:left; color:var(--dim); font-size:11px; letter-spacing:0.12em; padding:3px 6px; }
+  td { padding:3px 6px; border-top:1px solid rgba(255,255,255,0.06); }
+  tr.me td { color:var(--accent); font-weight:700; }
+  tr.dead td { opacity:0.5; }
+  #endBoard { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0; }
+  #lockhint { position:fixed; left:50%; top:60%; transform:translateX(-50%); display:none; background:var(--panel); padding:10px 18px; border:1px solid var(--line); cursor:pointer; }
+  @media (max-width:640px) { .grid { grid-template-columns:1fr; } .keys { grid-template-columns:auto 1fr; } }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0"></canvas>
+<div id="visor"></div>
+<canvas id="hud"></canvas>
+
+<div id="menu" class="screen">
+  <div class="card">
+    <h1>DELTA<span>-V</span></h1>
+    <div class="sub">Zero-G Team Deathmatch</div>
+    <div style="font-size:14px;color:var(--dim);line-height:1.4">No up. No free momentum. Every burn, shot and leak changes your trajectory. Fly a 24-nozzle RCS suit, push off walls, lead your shots and outfly the opposing squad.</div>
+    <div class="grid">
+      <label>Bot difficulty
+        <select id="optDiff"><option value="normal">Normal</option><option value="hard">Hard</option><option value="elite">Elite</option></select>
+      </label>
+      <label>Team size
+        <select id="optTeam"><option value="3">3 v 3</option><option value="4">4 v 4</option><option value="5">5 v 5</option><option value="6">6 v 6</option></select>
+      </label>
+      <label>Score limit
+        <select id="optScore"><option value="15">15 kills</option><option value="30">30 kills</option><option value="50">50 kills</option></select>
+      </label>
+      <label>RCS assist mode
+        <select id="optMode"><option value="0">Manual / Newtonian</option><option value="1">Rate damping</option><option value="2">Attitude hold</option><option value="3">Velocity match</option></select>
+      </label>
+      <label>Mouse sensitivity <span class="val" id="optSensV"></span>
+        <input type="range" id="optSens" min="0.2" max="3" step="0.05">
+      </label>
+      <label>Field of view <span class="val" id="optFovV"></span>
+        <input type="range" id="optFov" min="60" max="110" step="1">
+      </label>
+      <label>Volume <span class="val" id="optVolV"></span>
+        <input type="range" id="optVol" min="0" max="1" step="0.05">
+      </label>
+      <label style="flex-direction:row;align-items:center;gap:8px;margin-top:16px"><input type="checkbox" id="optInv"> Invert Y</label>
+    </div>
+    <div class="desc" id="modeDesc"></div>
+    <button id="btnDeploy">DEPLOY</button>
+    <div class="keys">
+      <b>Mouse</b><span>Aim head/gun in a ±60° neck cone; look past it and the RCS turns your body</span>
+      <b>W / S · A / D</b><span>Translate forward/back · left/right (body frame)</span>
+      <b>Space / C</b><span>Translate up / down</span>
+      <b>Q / E</b><span>Roll left / right</span>
+      <b>Shift</b><span>Match velocity (brake to station or locked target)</span>
+      <b>X</b><span>Kill rotation</span>
+      <b>F</b><span>Grab surface/pod; anchored: hold Space to push off</span>
+      <b>LMB / RMB</b><span>Fire / zoom</span>
+      <b>1 2 3 · Wheel</b><span>Rifle · Flechette · Gyrojet</span>
+      <b>R · G · V</b><span>Reload · Grenade · Momentum hammer</span>
+      <b>T · L · H</b><span>Cycle RCS mode · Lock velocity reference · Reference grid</span>
+      <b>Tab · Esc</b><span>Scoreboard · Pause</span>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="screen">
+  <div class="card" style="max-width:420px">
+    <h1 style="font-size:48px">PAUSED</h1>
+    <div class="grid" style="grid-template-columns:1fr">
+      <label>Mouse sensitivity <span class="val" id="optSens2V"></span><input type="range" id="optSens2" min="0.2" max="3" step="0.05"></label>
+    </div>
+    <div class="row"><button id="btnResume">RESUME</button><button class="alt" id="btnQuit">QUIT TO MENU</button></div>
+  </div>
+</div>
+
+<div id="end" class="screen">
+  <div class="card" style="max-width:720px">
+    <h1 id="endTitle" style="font-size:56px">VICTORY</h1>
+    <div class="sub" id="endScore"></div>
+    <div id="endBoard"></div>
+    <div class="row"><button id="btnAgain">REMATCH</button><button class="alt" id="btnMenu">MENU</button></div>
+  </div>
+</div>
+
+<div id="board"></div>
+<div id="lockhint">Click to resume control</div>
+<script src="dist/delta-v.js"></script>
+</body>
+</html>
