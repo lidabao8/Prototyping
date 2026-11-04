@@ -6,7 +6,7 @@ import { Combat } from './combat.js';
 import { HUD } from './hud.js';
 import { Bot } from './bot.js';
 import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR, HIT_THRESH } from './soldier.js';
-import { WEAPONS } from './weapons.js';
+import { WEAPONS, WEAPON_IDS, WEAPON_BLURB } from './weapons.js';
 import { clamp, rand, raySphere } from './math.js';
 
 const STEP = 1 / 120;
@@ -16,12 +16,19 @@ export const ACTIONS = [
   ['up', 'Move up / push off', 'Space'], ['down', 'Move down', 'ShiftLeft'], ['rollLeft', 'Roll left', 'KeyQ'], ['rollRight', 'Roll right', 'KeyE'],
   ['brake', 'Match velocity (brake)', 'KeyC'], ['killRot', 'Kill rotation', 'KeyX'], ['grab', 'Grab / release', 'KeyF'],
   ['reload', 'Reload', 'KeyR'], ['grenade', 'Grenade', 'KeyG'], ['melee', 'Momentum hammer', 'KeyV'],
-  ['weapon1', 'Rifle', 'Digit1'], ['weapon2', 'Flechette', 'Digit2'], ['weapon3', 'Gyrojet', 'Digit3'],
+  ['weapon1', 'Primary weapon', 'Digit1'], ['weapon2', 'Secondary weapon', 'Digit2'],
   ['mode', 'Cycle RCS mode', 'KeyT'], ['lockRef', 'Lock velocity reference', 'KeyL'], ['grid', 'Reference grid', 'KeyH'], ['board', 'Scoreboard', 'Tab'],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false };
-const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar' };
+const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'] };
+
+// how well each weapon suits each map (bots weight their loadout picks by this)
+const MAP_WEIGHTS = {
+  hangar: { rifle: 1.0, shotgun: 0.95, gyrojet: 0.5, recoilless: 0.6, maser: 0.85 },
+  yard: { rifle: 1.0, shotgun: 0.3, gyrojet: 0.95, recoilless: 0.85, maser: 0.9 },
+};
+const LONG = new Set(['rifle', 'gyrojet', 'recoilless', 'maser']);
 
 export function keyName(code) {
   if (!code) return '—';
@@ -109,6 +116,7 @@ class Game {
     st.binds = { ...DEFAULT_BINDS, ...(saved.binds || {}) };
     st.rules = { ...DEFAULT_RULES, ...(saved.rules || {}) };
     if (!MAPS[st.map]) st.map = 'hangar';
+    if (!Array.isArray(st.loadout) || st.loadout.length !== 2 || !st.loadout.every((id) => WEAPONS[id]) || st.loadout[0] === st.loadout[1]) st.loadout = [...DEFAULTS.loadout];
     return st;
   }
 
@@ -184,6 +192,7 @@ class Game {
     for (const k of Object.keys(DEFAULT_RULES)) chk('rule_' + k, () => st.rules[k], (v) => { st.rules[k] = v; });
     chk('optOutline', () => st.outlines, (v) => { st.outlines = v; });
     this.buildBindUI();
+    this.setupLoadoutUI();
     const rng = (id, key, out, fmt) => {
       const el = $(id); if (!el) return;
       el.value = st[key];
@@ -204,6 +213,70 @@ class Game {
     $('btnMenu').addEventListener('click', () => this.toMenu());
     this.ui.lock.addEventListener('click', () => this.lock());
     this.canvas.addEventListener('click', () => { if (this.state === 'playing' && document.pointerLockElement !== this.canvas) this.lock(); });
+  }
+
+  setupLoadoutUI() {
+    const st = this.settings;
+    const pairs = [['optPri', 'optSec'], ['optPri2', 'optSec2']];
+    const refresh = () => {
+      for (const [a, b] of pairs) {
+        const ea = document.getElementById(a), eb = document.getElementById(b);
+        if (ea) ea.value = st.loadout[0];
+        if (eb) eb.value = st.loadout[1];
+      }
+      for (const id of ['loadoutDesc', 'loadoutDesc2']) {
+        const d = document.getElementById(id);
+        if (d) d.textContent = st.loadout.map((w) => `${WEAPONS[w].short}: ${WEAPON_BLURB[w]}`).join('  ·  ') + `  (carried mass ${st.loadout.reduce((m, w) => m + WEAPONS[w].mass, 0).toFixed(1)} kg)`;
+      }
+    };
+    for (const [a, b] of pairs) {
+      for (const [id, slot] of [[a, 0], [b, 1]]) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.innerHTML = WEAPON_IDS.map((w) => `<option value="${w}">${WEAPONS[w].name}</option>`).join('');
+        el.addEventListener('change', () => {
+          const other = 1 - slot;
+          if (st.loadout[other] === el.value) st.loadout[other] = st.loadout[slot];
+          st.loadout[slot] = el.value;
+          this.saveSettings(); refresh();
+          if (this.state === 'paused') this.hud.message('LOADOUT CHANGES ON NEXT DEPLOY', '#ffcc4d', 2.5);
+        });
+      }
+    }
+    refresh();
+  }
+
+  /** Bots pick a loadout weighted by map, match settings, role and what is earning kills this match. */
+  botLoadout(s) {
+    const st = this.settings, base = MAP_WEIGHTS[this.world.mapId] || MAP_WEIGHTS.hangar;
+    const total = Object.values(this.weaponKills).reduce((a, b) => a + b, 0);
+    const role = s.bot ? s.bot.role : 'anchor';
+    const w = {};
+    for (const id of WEAPON_IDS) {
+      let v = base[id];
+      if (st.teamSize >= 6 && (id === 'gyrojet' || id === 'recoilless')) v *= 1.2;
+      if (st.difficulty === 'elite' && (id === 'rifle' || id === 'maser')) v *= 1.2;
+      if (st.difficulty === 'easy' && id === 'shotgun') v *= 1.2;
+      if (role === 'rusher' && id === 'shotgun') v *= 1.6;
+      if (role === 'anchor' && (id === 'rifle' || id === 'gyrojet' || id === 'recoilless')) v *= 1.3;
+      if (role === 'flanker' && (id === 'maser' || id === 'rifle')) v *= 1.2;
+      v *= 1 + 2.5 * (this.weaponKills[id] || 0) / (total + 6); // the match meta: what's working gets picked more
+      w[id] = v;
+    }
+    const pick = (weights, exclude) => {
+      const ids = WEAPON_IDS.filter((id) => id !== exclude);
+      let sum = 0; for (const id of ids) sum += weights[id];
+      let r = Math.random() * sum;
+      for (const id of ids) { r -= weights[id]; if (r <= 0) return id; }
+      return ids[0];
+    };
+    // primary from the long-range pool, secondary complements it
+    const pw = { ...w }; pw.shotgun *= role === 'rusher' ? 1 : 0.35;
+    const a = pick(pw, null);
+    const sw = { ...w };
+    for (const id of WEAPON_IDS) sw[id] *= LONG.has(a) ? (id === 'shotgun' ? 2.2 : 0.6) : (LONG.has(id) ? 1.4 : 1);
+    const b = pick(sw, a);
+    return [a, b];
   }
 
   buildBindUI() {
@@ -227,6 +300,7 @@ class Game {
             this.saveSettings();
           }
           this.buildBindUI();
+    this.setupLoadoutUI();
         };
       });
       row.append(l, b); box.append(row);
@@ -295,6 +369,7 @@ class Game {
     }
     this.applySettings();
     this.teamScore = [0, 0];
+    this.weaponKills = {};
     this.scoreLimit = st.scoreLimit;
     this.timeLimit = 10 * 60;
     this.matchTime = 0;
@@ -333,6 +408,7 @@ class Game {
       if (score > bestScore) { bestScore = score; best = p; }
     }
     const facing = new THREE.Vector3(s.team === 0 ? 1 : -1, 0, 0);
+    s.loadout = s.isPlayer ? [...this.settings.loadout] : this.botLoadout(s);
     s.spawn(best, facing);
     s.oobT = 0;
     s.mode = s.isPlayer ? this.settings.mode : 2;
@@ -422,6 +498,7 @@ class Game {
     if (!killer && s.lastAttacker && this.time - (s.lastAttackerT || 0) < 6) killer = s.lastAttacker;
     if (killer && killer.team !== s.team) {
       killer.kills++; killer.score += 100;
+      if (WEAPONS[cause]) this.weaponKills[cause] = (this.weaponKills[cause] || 0) + 1;
       this.teamScore[killer.team]++;
       if (killer.isPlayer) this.hud.message(`ELIMINATED ${s.name}${head ? ' – HEADSHOT' : ''}`, '#ff4b3a', 1.8);
     }
@@ -449,8 +526,8 @@ class Game {
     for (const team of [0, 1]) {
       const list = this.soldiers.filter((s) => s.team === team).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
       h += `<div class="bteam" style="--tc:${'#' + TEAM_COLORS[team].toString(16).padStart(6, '0')}"><div class="bhead"><b>${TEAM_NAMES[team]}</b><span>${this.teamScore[team]}</span></div>`;
-      h += '<table><tr><th>CALLSIGN</th><th>K</th><th>D</th><th>Δv</th></tr>';
-      for (const s of list) h += `<tr class="${s.isPlayer ? 'me' : ''}${s.alive ? '' : ' dead'}"><td>${s.name}</td><td>${s.kills}</td><td>${s.deaths}</td><td>${s.alive ? s.dv.toFixed(0) : '—'}</td></tr>`;
+      h += '<table><tr><th>CALLSIGN</th><th>LOADOUT</th><th>K</th><th>D</th><th>Δv</th></tr>';
+      for (const s of list) h += `<tr class="${s.isPlayer ? 'me' : ''}${s.alive ? '' : ' dead'}"><td>${s.name}</td><td class="lo">${(s.loadout || []).map((w) => WEAPONS[w].short).join(' + ')}</td><td>${s.kills}</td><td>${s.deaths}</td><td>${s.alive ? s.dv.toFixed(0) : '—'}</td></tr>`;
       h += '</table></div>';
     }
     return h;
@@ -471,7 +548,7 @@ class Game {
       s.grab = { kind: 'pod', obj: pod, offset: s.pos.clone().sub(pod.pos), normal: surf.normal };
     } else {
       s.vel.set(0, 0, 0);
-      s.grab = { kind: surf.kind, obj: surf.obj, normal: surf.normal, point: surf.point };
+      s.grab = { kind: surf.kind, obj: surf.obj, normal: surf.normal, point: surf.point, dist: Math.max(BODY_R + 0.05, surf.dist) };
     }
     s.angVel.multiplyScalar(0.2);
     s.holdQ = null;
@@ -529,8 +606,9 @@ class Game {
       else if (p.pushCharge > 0) { this.pushOff(p, p.aimDir(new THREE.Vector3()), 2 + 5 * p.pushCharge); p.pushCharge = 0; }
     } else p.pushCharge = 0;
     // weapons
-    for (let i = 0; i < 3; i++) if (this.pressedAct('weapon' + (i + 1))) p.switchTo(i);
-    if (inp.mouse.wheel) p.switchTo((p.cur + (inp.mouse.wheel > 0 ? 1 : 2)) % 3);
+    const nW = p.weapons.length;
+    for (let i = 0; i < nW; i++) if (this.pressedAct('weapon' + (i + 1))) p.switchTo(i);
+    if (inp.mouse.wheel) p.switchTo((p.cur + (inp.mouse.wheel > 0 ? 1 : nW - 1)) % nW);
     if (this.pressedAct('reload')) { if (p.startReload()) this.audio.play('reload'); }
     if (this.pressedAct('grenade')) this.combat.throwGrenade(p);
     if (this.pressedAct('melee')) this.combat.melee(p);

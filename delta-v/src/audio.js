@@ -60,6 +60,8 @@ export class Audio {
       case 'rifle': this.burst({ freq: 1800, dur: 0.12, gain: 0.35, tone: 140, toneDur: 0.08, dist }); break;
       case 'shotgun': this.burst({ freq: 900, dur: 0.3, gain: 0.6, tone: 90, toneDur: 0.2, dist }); break;
       case 'gyro': this.burst({ freq: 3000, type: 'highpass', dur: 0.5, gain: 0.25, dist }); break;
+      case 'recoilless': this.burst({ freq: 700, dur: 0.6, gain: 0.7, tone: 70, toneDur: 0.35, dist }); break;
+      case 'maser': this.beep(2600 + Math.random() * 200, 0.05, dist > 3 ? 0.02 / (1 + dist * 0.05) : 0.05, 'sawtooth'); break;
       case 'explosion': this.burst({ freq: 400, dur: 1.0, gain: 0.9, tone: 60, toneDur: 0.6, dist }); break;
       case 'hit': this.beep(1400, 0.05, 0.12, 'triangle'); break;
       case 'head': this.beep(2100, 0.07, 0.15, 'triangle'); break;

@@ -21,6 +21,7 @@ export const ROLL_RATE = 1.5;
 const RATE_K = 3.2;
 const TA = 0.42, TB = 0.5;       // thruster tower lateral/vertical offset (m)
 export const HIT_THRESH = 8;     // m/s wall impact before damage
+export const CRAWL_SPEED = 2.2;  // m/s hand-over-hand along a surface
 
 // tower positions (body frame) and signs
 export const TOWERS = [
@@ -69,6 +70,19 @@ export function makeGunMesh(id, teamColor) {
     add(new THREE.CylinderGeometry(0.03, 0.03, 0.34, 8).rotateX(Math.PI / 2), dark, 0, -0.045, -0.4);
     add(new THREE.BoxGeometry(0.06, 0.15, 0.08), dark, 0, -0.11, 0.02);
     add(new THREE.BoxGeometry(0.105, 0.015, 0.25), accent, 0, 0.06, -0.1);
+  } else if (id === 'recoilless') {
+    add(new THREE.CylinderGeometry(0.075, 0.075, 0.95, 10).rotateX(Math.PI / 2), light, 0, 0.03, -0.2);
+    add(new THREE.CylinderGeometry(0.1, 0.075, 0.18, 10).rotateX(Math.PI / 2), dark, 0, 0.03, 0.33);
+    add(new THREE.BoxGeometry(0.06, 0.15, 0.08), dark, 0, -0.1, -0.05);
+    add(new THREE.BoxGeometry(0.05, 0.08, 0.16), dark, -0.09, 0.08, -0.2);
+    add(new THREE.TorusGeometry(0.078, 0.012, 6, 16), accent, 0, 0.03, -0.55);
+  } else if (id === 'maser') {
+    add(new THREE.BoxGeometry(0.09, 0.1, 0.5), light, 0, 0, -0.08);
+    add(new THREE.CylinderGeometry(0.03, 0.045, 0.25, 8).rotateX(Math.PI / 2), dark, 0, 0.01, -0.45);
+    add(new THREE.BoxGeometry(0.11, 0.06, 0.2), dark, 0, 0.07, 0.0);
+    add(new THREE.BoxGeometry(0.05, 0.15, 0.07), dark, 0, -0.11, -0.04);
+    const coil = add(new THREE.BoxGeometry(0.095, 0.02, 0.3), new THREE.MeshBasicMaterial({ color: 0x9ff0ff }), 0, -0.04, -0.12);
+    coil.userData.noOutline = true;
   } else {
     add(new THREE.CylinderGeometry(0.06, 0.06, 0.55, 10).rotateX(Math.PI / 2), light, 0, 0.01, -0.15);
     add(new THREE.CylinderGeometry(0.075, 0.06, 0.12, 10).rotateX(Math.PI / 2), dark, 0, 0.01, -0.45);
@@ -230,7 +244,7 @@ export class Soldier {
     this.grab = null;
     this.leaks = [];
     this.towers = TOWERS.map(() => ({ hp: 30, dead: false }));
-    this.weapons = [new WeaponState(WEAPONS.rifle), new WeaponState(WEAPONS.shotgun), new WeaponState(WEAPONS.gyrojet)];
+    this.weapons = (this.loadout || ['rifle', 'shotgun']).map((id) => new WeaponState(WEAPONS[id] || WEAPONS.rifle));
     this.cur = 0; this.switchT = 0;
     this.grenades = GRENADE.count;
     this.grenadeCool = 0;
@@ -280,6 +294,21 @@ export class Soldier {
   setAimDir(d) {
     const f = this.forward(_v2);
     _q.setFromUnitVectors(f, _v.copy(d).normalize());
+    this.quat.premultiply(_q).normalize();
+    if (this.holdQ) this.holdQ.premultiply(_q).normalize();
+  }
+
+  /** Roll about the body's forward axis so its up vector leans toward upWorld, at most maxAng radians. */
+  rollToward(upWorld, maxAng) {
+    const f = this.forward(_v2);
+    const up = _v.set(0, 1, 0).applyQuaternion(this.quat);
+    const d = _v3.copy(upWorld).addScaledVector(f, -upWorld.dot(f));
+    if (d.lengthSq() < 0.01) return;
+    d.normalize();
+    const ang = Math.atan2(f.dot(_v4.crossVectors(up, d)), up.dot(d));
+    const a = Math.max(-maxAng, Math.min(maxAng, ang));
+    if (Math.abs(a) < 1e-4) return;
+    _q.setFromAxisAngle(f, a);
     this.quat.premultiply(_q).normalize();
     if (this.holdQ) this.holdQ.premultiply(_q).normalize();
   }
@@ -469,9 +498,7 @@ export class Soldier {
       }
       this.pos.copy(pod.pos).add(g.offset);
       this.vel.copy(pod.vel);
-    } else {
-      this.vel.set(0, 0, 0);
-    }
+    } else if (!this.crawl(dt)) return;
     // anchored: hands stop any spin; roll keys twist you around the handhold for free
     const wDes = _wDes.set(0, 0, this.ctrl.roll * 1.0);
     this.angVel.lerp(wDes, Math.min(1, dt * 8));
@@ -480,6 +507,39 @@ export class Soldier {
       _q.setFromAxisAngle(_v.copy(w).divideScalar(wl), wl * dt);
       this.quat.multiply(_q).normalize();
     }
+  }
+
+  /** Hand-over-hand crawl along a grabbed surface (no gas). Wraps around edges; lets go past the end of a surface. */
+  crawl(dt) {
+    const g = this.grab, world = this.game.world;
+    this.vel.set(0, 0, 0);
+    const mv = _v.copy(this.ctrl.move);
+    if (mv.lengthSq() === 0 || !g.normal) return true;
+    mv.applyQuaternion(this.quat).normalize();
+    const out = mv.dot(g.normal);
+    mv.addScaledVector(g.normal, -out);
+    let l = mv.length();
+    if (l < 0.3 && out > 0 && g.prevNormal) {
+      // key points off the surface right after an edge: keep going over the edge
+      mv.copy(g.prevNormal).negate().addScaledVector(g.normal, g.prevNormal.dot(g.normal));
+      l = mv.length();
+    }
+    if (l < 1e-3) return true;
+    mv.multiplyScalar(CRAWL_SPEED / l);
+    this.vel.copy(mv);
+    this.pos.addScaledVector(mv, dt);
+    const d0 = g.dist || BODY_R + 0.2;
+    const sf = world.nearestSurface(this.pos, d0 + 0.7);
+    if (!sf || sf.kind === 'pod') {
+      // crawled off the end of the surface: let go, keeping the crawl velocity
+      this.grab = null; this.holdQ = null;
+      return false;
+    }
+    if (sf.normal.dot(g.normal) < 0.97) g.prevNormal = g.normal.clone();
+    g.normal = sf.normal; g.point = sf.point; g.kind = sf.kind; g.obj = sf.obj;
+    this.pos.copy(sf.point).addScaledVector(sf.normal, d0);
+    world.sphereContacts(this.pos, BODY_R, (n, depth) => this.pos.addScaledVector(n, depth));
+    return true;
   }
 
   collide(dt, world) {
@@ -520,7 +580,13 @@ export class Soldier {
     this.spawnProtect -= dt;
     this.grenadeCool -= dt; this.meleeCool -= dt;
     // weapon timers
-    for (const w of this.weapons) w.cool -= dt;
+    for (const w of this.weapons) {
+      w.cool -= dt;
+      if (w.def.kind === 'beam') {
+        w.heat = Math.max(0, w.heat - w.def.coolRate * dt);
+        if (w.overheat && w.heat < 0.35) w.overheat = false;
+      }
+    }
     const w = this.weapon;
     if (this.switchT > 0) this.switchT -= dt;
     if (w.reloadT > 0) {
@@ -554,7 +620,7 @@ export class Soldier {
 
   startReload() {
     const w = this.weapon;
-    if (w.reloadT > 0 || w.mag >= w.def.mag || w.reserve <= 0) return false;
+    if (w.def.kind === 'beam' || w.reloadT > 0 || w.mag >= w.def.mag || w.reserve <= 0) return false;
     w.reloadT = w.def.reload; w.cancel = false;
     return true;
   }
@@ -585,4 +651,5 @@ export class Soldier {
 const _cmdR = new THREE.Vector3(), _cmdT = new THREE.Vector3(), _wDes = new THREE.Vector3(), _zero = new THREE.Vector3();
 const _F = new THREE.Vector3(), _T = new THREE.Vector3(), _f = new THREE.Vector3(), _Fw = new THREE.Vector3(), _Tb = new THREE.Vector3();
 const _I = new THREE.Vector3(), _q2 = new THREE.Quaternion();
+const _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
 const _AX = new THREE.Vector3(1, 0, 0), _AY = new THREE.Vector3(0, 1, 0);

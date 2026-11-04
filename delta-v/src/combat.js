@@ -12,6 +12,7 @@ export class Combat {
     this.game = game;
     this.projectiles = [];
     this.grenades = [];
+    this.beams = [];
     const gGeo = new THREE.IcosahedronGeometry(0.12, 0);
     this.gGeo = gGeo;
     this.gMat = [0x3f8cff, 0xff8a2a].map((c) => new THREE.MeshStandardMaterial({ color: 0x333333, emissive: c, emissiveIntensity: 0.9 }));
@@ -30,6 +31,7 @@ export class Combat {
   fire(s) {
     const w = s.weapon, def = w.def, g = this.game;
     if (!s.alive || s.switchT > 0 || w.cool > 0) return false;
+    if (def.kind === 'beam') return this.fireBeam(s, w, def);
     if (w.reloadT > 0) {
       if (def.perShell && w.mag > 0) { w.reloadT = 0; } else return false;
     }
@@ -69,9 +71,81 @@ export class Combat {
     s.kick.y += def.kick * (Math.random() - 0.5) * 0.8;
     s.addAim(def.kick * (Math.random() - 0.5) * 0.5, def.kick * (0.6 + Math.random() * 0.5));
     g.fx.muzzle(muzzle, aim, s.vel, def.kind === 'pellets');
+    if (def.backblast) this.backblast(s, aim, muzzle, def.backblast);
     g.onShot(s, def);
     if (w.mag === 0 && w.reserve > 0) setTimeout(() => { if (s.alive && s.weapon === w) s.startReload(); }, 250);
     return true;
+  }
+
+  /** First soldier hit along a ray (hitbox spheres). */
+  raySoldier(o, dir, maxT, skip) {
+    let best = maxT, sol = null, part = null;
+    for (const s of this.game.soldiers) {
+      if (!s.alive || s === skip) continue;
+      const rel = _v2.subVectors(s.pos, o);
+      const along = Math.max(0, Math.min(maxT, rel.dot(dir)));
+      if (rel.addScaledVector(dir, -along).lengthSq() > 1.8) continue;
+      for (const hb of HITBOXES) {
+        _hc.copy(hb.p).applyQuaternion(s.quat).add(s.pos);
+        const t = raySphere(o, dir, _hc, hb.r, best);
+        if (t >= 0 && t < best) { best = t; sol = s; part = hb; }
+      }
+    }
+    return sol ? { t: best, s: sol, part } : null;
+  }
+
+  fireBeam(s, w, def) {
+    const g = this.game;
+    if (w.overheat) { if (s.isPlayer && w.cool <= 0) { g.audio.play('empty'); w.cool = 0.3; } return false; }
+    w.cool = 60 / def.rpm;
+    w.heat += def.heatPer;
+    if (w.heat >= 1) { w.heat = 1; w.overheat = true; if (s.isPlayer) g.hud.message('MASER OVERHEATED', '#ffcc4d', 1.2); }
+    s.spawnProtect = 0;
+    s.lastFireT = g.time;
+    const eye = s.eye(new THREE.Vector3());
+    const d = s.aimDir(new THREE.Vector3());
+    if (def.spread) d.addScaledVector(randomPerp(d, _v), Math.tan(def.spread * Math.sqrt(Math.random()))).normalize();
+    const h = g.world.raycast(eye, d, def.range);
+    let end = h ? h.t : def.range;
+    const hit = this.raySoldier(eye, d, end, s);
+    if (hit) end = hit.t;
+    const hp = eye.clone().addScaledVector(d, end);
+    const muzzle = this.muzzlePoint(s, new THREE.Vector3());
+    this.beams.push({ a: muzzle, b: hp, life: 0.06 });
+    if (hit) {
+      const t = hit.s;
+      if (t.team !== s.team && t.spawnProtect <= 0) {
+        const dmg = def.dmg * (hit.part.part === 'head' ? def.headMul : hit.part.part === 'leg' ? 0.75 : 1);
+        if (g.rules.breaches && hit.part.part !== 'leg' && Math.random() < 0.04 && t.leaks.length < 3) {
+          const bp = hp.clone().sub(t.pos).applyQuaternion(_q.copy(t.quat).invert());
+          t.leaks.push({ p: bp, n: bp.clone().sub(hit.part.p).normalize(), t: 4 });
+        }
+        g.damage(t, dmg, s, def.id, hp, hit.part.part);
+      }
+      if (Math.random() < 0.4) g.fx.sparks(hp, 2, d.clone().negate(), 3, COLORS.cyan);
+    } else if (h && Math.random() < 0.5) g.fx.sparks(hp, 2, h.n, 3, COLORS.cyan);
+    w.sndT = (w.sndT || 0) - 1;
+    if (w.sndT <= 0) { w.sndT = 3; g.onShot(s, def); }
+    return true;
+  }
+
+  backblast(s, aim, muzzle, bb) {
+    const g = this.game;
+    const back = muzzle.clone().addScaledVector(aim, -1.4);
+    g.fx.muzzle(back, aim.clone().negate(), s.vel, true);
+    for (let i = 0; i < 14; i++) {
+      const v = aim.clone().multiplyScalar(-(4 + Math.random() * 8)).add(_v.randomDirection().multiplyScalar(2)).add(s.vel);
+      g.fx.alpha.spawn(back, v, COLORS.smoke, 0.4, 1.2, { grow: 3, alpha: 0.4 });
+    }
+    for (const o of g.soldiers) {
+      if (o === s || !o.alive) continue;
+      const rel = _v.subVectors(o.pos, back);
+      const d = rel.length();
+      if (d > bb.range || d < 1e-3 || -rel.dot(aim) / d < 0.6 || !g.world.los(back, o.pos, true)) continue;
+      const f = 1 - d / bb.range;
+      o.applyImpulse(aim.clone().multiplyScalar(-bb.impulse * f), o.pos);
+      if (o.team !== s.team) g.damage(o, bb.dmg * f, s, 'backblast', o.pos, 'body');
+    }
   }
 
   throwGrenade(s) {
@@ -163,6 +237,8 @@ export class Combat {
       if (p.visOff) { p.visOff.multiplyScalar(Math.exp(-dt * 25)); }
       if (p.age > 3.5) this.removeProj(i);
     }
+    for (const b of this.beams) b.life -= dt;
+    if (this.beams.length) this.beams = this.beams.filter((b) => b.life > 0);
     // grenades
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const gr = this.grenades[i];
@@ -293,6 +369,12 @@ export class Combat {
       const vp = p._vp || (p._vp = new THREE.Vector3());
       vp.copy(p.pos).add(p.visOff);
       out.push({ pos: vp, vel: p.vel, color: p.color, tail: Math.min(p.tail, p.age + 0.004) });
+    }
+    const bc = this.color(0x9ff0ff);
+    for (const b of this.beams) {
+      b._v = b._v || new THREE.Vector3();
+      b._v.subVectors(b.b, b.a);
+      out.push({ pos: b.b, vel: b._v, color: bc, tail: 1 });
     }
     return out;
   }

@@ -11,7 +11,7 @@ export const SKILLS = {
 };
 
 const ROLES = ['anchor', 'rusher', 'flanker', 'anchor', 'flanker', 'rusher'];
-const PREF_RANGE = { rifle: 28, shotgun: 6, gyrojet: 34 };
+const PREF_RANGE = { rifle: 28, shotgun: 6, gyrojet: 34, recoilless: 26, maser: 24 };
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
 const CHEST = new THREE.Vector3(0, 0.2, 0), HEAD = new THREE.Vector3(0, 0.6, 0);
 
@@ -185,29 +185,42 @@ export class Bot {
     this.lastPos.copy(s.pos);
   }
 
+  /** How well a weapon suits the current fight (0 = useless). */
+  suit(ws, dist, relSpeed, anchored) {
+    const d = ws.def;
+    if (d.kind !== 'beam' && ws.mag === 0 && ws.reserve === 0) return 0;
+    let v;
+    switch (d.id) {
+      case 'shotgun': v = dist < 9 ? 1.6 : dist < 16 ? 0.8 : 0.08; break;
+      case 'rifle': v = dist < 4 ? 0.7 : 1.0; break;
+      case 'gyrojet': v = dist < 9 ? 0.05 : (relSpeed < 2 || anchored) ? 1.35 : 0.55; break;
+      case 'recoilless': v = dist < 6 ? 0.1 : (relSpeed < 3 || anchored) ? 1.25 : 0.8; break;
+      case 'maser': v = ws.overheat ? 0 : dist < 80 ? 1.15 - ws.heat * 0.5 : 0.4; break;
+      default: v = 0.5;
+    }
+    if (d.kind !== 'beam' && ws.mag === 0) v *= ws === this.s.weapon ? 0.5 : 0.35; // would need a reload first
+    return v;
+  }
+
   manageWeapons(tgt) {
     const s = this.s, w = s.weapon;
-    const dist = tgt ? tgt.pos.distanceTo(s.pos) : Infinity;
-    const sg = s.weapons[1], gj = s.weapons[2], rf = s.weapons[0];
-    let want = s.cur;
     if (tgt) {
+      const dist = tgt.pos.distanceTo(s.pos);
       const relSpeed = _v.subVectors(tgt.vel, s.vel).length();
-      if (dist < 9 && (sg.mag > 0 || sg.reserve > 0)) want = 1;
-      else if (dist > 14 && dist < 70 && (relSpeed < 1.8 || tgt.grab) && (gj.mag > 0) && Math.random() < 0.35) want = 2;
-      else if (s.cur === 2 && (gj.mag === 0 || relSpeed > 3)) want = 0;
-      else if (s.cur === 1 && dist > 14) want = 0;
-      if (want === 0 && rf.mag === 0 && rf.reserve === 0) want = 1;
+      let best = s.cur, bestV = -1;
+      s.weapons.forEach((ws, i) => {
+        const v = this.suit(ws, dist, relSpeed, !!tgt.grab) * (i === s.cur ? 1.15 : 1); // hysteresis
+        if (v > bestV) { bestV = v; best = i; }
+      });
+      if (best !== s.cur && s.switchT <= 0) s.switchTo(best);
     } else {
-      want = 0;
-      // tactical reloads while nobody is in sight
-      for (const ws of s.weapons) if (ws === w && ws.mag < ws.def.mag * 0.6) s.startReload();
+      // between fights: hold the most versatile weapon and top it off
+      let best = 0, bestV = -1;
+      s.weapons.forEach((ws, i) => { const v = this.suit(ws, 25, 2, false); if (v > bestV) { bestV = v; best = i; } });
+      if (best !== s.cur && s.switchT <= 0) s.switchTo(best);
+      for (const ws of s.weapons) if (ws === w && ws.def.kind !== 'beam' && ws.mag < ws.def.mag * 0.6) s.startReload();
     }
-    if (want !== s.cur) s.switchTo(want);
-    if (s.weapon.mag === 0) {
-      // out of ammo in a close fight: swapping is faster than reloading
-      if (tgt && dist < 12 && s.cur !== 1 && sg.mag > 0) s.switchTo(1);
-      else s.startReload();
-    }
+    if (s.weapon.def.kind !== 'beam' && s.weapon.mag === 0) s.startReload();
   }
 
   planGoal() {
@@ -274,6 +287,11 @@ export class Bot {
       if (!w.los(nd.pos, tp, true)) continue;
       let score = Math.abs(dist - pref) * 0.5 + nd.pos.distanceTo(s.pos) * 0.35;
       if (nd.surf) score -= 7;           // can anchor there: stable aim, free push-off, fuel regen
+      // use the third dimension: attack from above/below the target's own plane, where it has to pitch to answer
+      const off = _v.subVectors(nd.pos, tp).normalize();
+      const tUp = _v2.set(0, 1, 0).applyQuaternion(tgt.quat);
+      score -= Math.abs(off.dot(tUp)) * 6;
+      score -= Math.abs(nd.pos.y - s.pos.y) > 5 ? 1.5 : 0;
       score += (this.exposure(nd.pos, threats) - 1) * 8;
       score += this.teammatePenalty(nd.pos);
       if (this.role === 'flanker') {
@@ -332,7 +350,7 @@ export class Bot {
     if (this.role === 'rusher') x = side * rand(5, 45) * kx;
     else if (this.role === 'anchor') x = side * rand(-25, 20) * kx;
     else x = side * rand(-10, 40) * kx;
-    const p = new THREE.Vector3(x, rand(-28, 28) * ky, rand(-28, 28) * ky);
+    const p = new THREE.Vector3(x, rand(-31, 31) * ky, rand(-31, 31) * ky);
     if (r < 0.15) p.set(rand(-12, 12) * kx, rand(-20, 20) * ky, rand(-20, 20) * ky);
     let best = -1, bd = Infinity;
     w.forNear(p, 12 * Math.max(1, kx * 0.8), (i) => { const nd = w.nav[i]; const d = nd.pos.distanceTo(p) - (nd.surf ? 6 : 0); if (d < bd) { bd = d; best = i; } });
@@ -351,6 +369,7 @@ export class Bot {
     this._dt = dt;
     this.steer(dt);
     this.aim(dt);
+    this.roll(dt);
     this.actions(dt);
   }
 
@@ -420,7 +439,10 @@ export class Bot {
     if (this.state === 'engage' && this.target && fuel > 0.45) {
       if (t > this.jinkT) {
         const los = _v.subVectors(this.target.pos, s.pos).normalize();
-        randomPerp(los, this.jink).multiplyScalar(rand(0.8, 1.9) * this.skill.jink);
+        randomPerp(los, this.jink);
+        const tUp = _v3.set(0, 1, 0).applyQuaternion(this.target.quat);
+        this.jink.addScaledVector(tUp, (Math.random() < 0.5 ? -1 : 1) * 0.8);
+        this.jink.addScaledVector(los, -this.jink.dot(los)).normalize().multiplyScalar(rand(0.8, 1.9) * this.skill.jink);
         this.jinkT = t + rand(1.2, 2.6);
       }
       vDes.add(this.jink);
@@ -480,7 +502,8 @@ export class Bot {
       const vRel = _v3.copy(this.velEst).sub(s.vel);
       const def = s.weapon.def;
       let tt;
-      if (def.kind === 'rocket') tt = interceptTimeRocket(rel, vRel, def.speed, def.accel, def.burn);
+      if (def.kind === 'beam') tt = 0;
+      else if (def.kind === 'rocket') tt = interceptTimeRocket(rel, vRel, def.speed, def.accel, def.burn);
       else tt = interceptTime(rel, vRel, def.speed);
       if (tt > 0) rel.addScaledVector(vRel, tt);
       return out.copy(rel).normalize();
@@ -536,6 +559,23 @@ export class Bot {
     s.setAimDir(cur);
   }
 
+  /** Roll the body: feet to the surface when anchored, otherwise re-orient now and then (no fixed "up" in orbit). */
+  roll(dt) {
+    const s = this.s, t = this.game.time;
+    let up = null, rate = 1.3;
+    if (s.grab && s.grab.normal && s.grab.kind !== 'pod') up = s.grab.normal;
+    else {
+      if (!this.upPref || t > this.upT) {
+        const combat = this.state === 'engage';
+        this.upT = t + (combat ? rand(1.5, 3.5) : rand(3, 7));
+        this.upPref = (this.upPref || new THREE.Vector3()).randomDirection();
+        this.rollRate = combat ? rand(0.8, 2.0) : rand(0.4, 1.0);
+      }
+      up = this.upPref; rate = this.rollRate;
+    }
+    s.rollToward(up, rate * dt);
+  }
+
   actions(dt) {
     const s = this.s, g = this.game, t = g.time;
     const tgt = this.target;
@@ -561,6 +601,16 @@ export class Bot {
       }
     }
     if (angErr > tol || s.weapon.reloadT > 0 || s.switchT > 0) return;
+    const wsb = s.weapon;
+    if (wsb.def.kind === 'beam') {
+      // heat discipline: let the emitter cool before it locks out
+      if (wsb.heat > 0.85) this.coolUntil = t + 0.6;
+      if (this.coolUntil > t || wsb.overheat) return;
+    }
+    // recoilless backblast: don't fire with a teammate right behind
+    if (wsb.def.backblast) {
+      for (const o of g.soldiers) if (o !== s && o.alive && o.team === s.team && o.pos.distanceTo(eye) < 7 && _v2.subVectors(o.pos, eye).dot(aim) < 0) return;
+    }
     if (!this.lineClearOfFriends(eye, aim, dist)) return;
     // burst discipline at range so recoil drift and aim kick settle
     if (this.burstPause > t) return;

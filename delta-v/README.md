@@ -31,9 +31,12 @@ npm run build      # or: npm run watch / npm run serve (http://localhost:8081)
 ## Combat
 
 * **Recoil is propulsion.** The ejected momentum pushes you back at the muzzle, which sits off your centre of mass, so it also spins you. A 10 g round at 400 m/s gives a 125 kg soldier about 0.03 m/s. A full magazine gives about 1 m/s.
-* **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
-* **FL-12 flechette:** heavy recoil (about 0.75 m/s per shot). It doubles as an escape burn.
-* **GJ-3 gyrojet:** nearly recoilless. The rounds launch slowly and accelerate, with a small splash.
+* **Loadout:** pick a primary and a secondary in the menu (or from the pause menu, for your next deploy). Weapon mass counts towards your suit's mass.
+  * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
+  * **FL-12 flechette:** heavy recoil (about 0.75 m/s per shot). It doubles as an escape burn.
+  * **GJ-3 gyrojet:** nearly recoilless. The rounds launch slowly and accelerate, with a small splash.
+  * **RR-90 recoilless:** a single 88-damage slug and no recoil, but the backblast shoves (and hurts enemies) up to 7 m behind you.
+  * **LM-2 maser:** hitscan beam with no recoil and no ammo. It overheats after about 2 s of continuous fire.
 * **Grenades:** fly straight and bounce elastically off walls.
 * **Momentum hammer (V):** sends the target tumbling.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
@@ -74,9 +77,9 @@ Every key can be rebound in the menu under **Controls & keybinds**. Rebinding a 
 | Q / E | Roll |
 | C | Match velocity (brake) |
 | X | Kill rotation |
-| F | Grab or release the nearest surface or pod |
+| F | Grab or release the nearest surface or pod. While holding a surface, the move keys crawl you along it hand-over-hand (no gas, wraps around edges, lets go past the end). |
 | LMB / RMB | Fire / zoom (fixed) |
-| 1 2 3, wheel | Switch weapon |
+| 1 2, wheel | Primary / secondary weapon |
 | R / G / V | Reload / grenade / hammer |
 | T / L / H | Assist mode / lock velocity reference / reference grid |
 | Tab / Esc | Scoreboard / pause (Esc is fixed) |
@@ -98,4 +101,12 @@ Bots fly the same suit through the same thruster allocation, with the same gas b
   * Paths come from A* over a 3D navigation graph of free-space and surface nodes, smoothed by string-pulling.
   * They fly a braking-distance velocity profile and coast inside a deadband to save gas.
   * They arrive at handholds at about 2.5 m/s and let their arms absorb it, push off walls when they can, dodge sideways when someone aims at them, avoid predicted collisions, and go anchor to refill when their gas runs low.
+* **Loadouts:** each respawn, a bot picks two weapons weighted by:
+  * the map (more flechettes in the hangar; gyrojets and recoilless rifles in open space);
+  * the match settings (team size, difficulty);
+  * its role;
+  * which weapons are earning kills this match.
+
+  In a fight it switches to whichever carried weapon suits the range, target speed and ammo, manages maser heat, and won't fire the recoilless with a teammate behind it.
+* **3D flight:** bots favour attack positions above or below the target's own body plane, bias their jinks along that axis, and roll: they plant their feet on surfaces they're holding, and re-orient every few seconds in flight.
 * **Difficulty:** Easy, Normal, Hard and Elite change reaction time, aim settling, error floor, tracking rate, velocity-estimate noise, field of view and aggressiveness.

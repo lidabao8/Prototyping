@@ -41,6 +41,7 @@
   th { text-align:left; color:var(--dim); font-size:11px; letter-spacing:0.12em; padding:3px 6px; }
   td { padding:3px 6px; border-top:1px solid rgba(255,255,255,0.06); }
   tr.me td { color:var(--accent); font-weight:700; }
+  td.lo { color:var(--dim); font-size:12px; }
   tr.dead td { opacity:0.5; }
   #endBoard { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0; }
   h3 { margin:14px 0 4px; font-size:12px; letter-spacing:0.22em; color:var(--hud); font-weight:700; }
@@ -100,6 +101,12 @@
       <label style="flex-direction:row;align-items:center;gap:8px;margin-top:16px"><input type="checkbox" id="optInv"> Invert Y</label>
     </div>
     <div class="desc" id="modeDesc"></div>
+    <h3>LOADOUT</h3>
+    <div class="grid">
+      <label>Primary <select id="optPri"></select></label>
+      <label>Secondary <select id="optSec"></select></label>
+    </div>
+    <div class="desc" id="loadoutDesc" style="color:var(--dim)"></div>
     <h3>PHYSICS</h3>
     <div class="toggles">
       <label><input type="checkbox" id="rule_recoil"><span>Recoil thrust<small>shots push and spin you</small></span></label>
@@ -123,7 +130,10 @@
     <h1 style="font-size:48px">PAUSED</h1>
     <div class="grid" style="grid-template-columns:1fr">
       <label>Mouse sensitivity <span class="val" id="optSens2V"></span><input type="range" id="optSens2" min="0.2" max="3" step="0.05"></label>
+      <label>Primary (next deploy) <select id="optPri2"></select></label>
+      <label>Secondary (next deploy) <select id="optSec2"></select></label>
     </div>
+    <div class="desc" id="loadoutDesc2" style="color:var(--dim);font-size:12px"></div>
     <div class="row"><button id="btnResume">RESUME</button><button class="alt" id="btnQuit">QUIT TO MENU</button></div>
   </div>
 </div>

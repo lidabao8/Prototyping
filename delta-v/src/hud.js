@@ -418,15 +418,20 @@ export class HUD {
     const x = W - 20, y = H - 110;
     g.fillStyle = 'rgba(8,12,16,0.55)'; g.fillRect(x - 240, y - 50, 248, 148);
     this.text(w.def.name, x, y, 14, '#e9eef2', 'right', 700);
-    this.text(`${w.mag}`, x - 60, y + 34, 38, w.mag === 0 ? DANGER : '#e9eef2', 'right', 700);
-    this.text(`/ ${w.reserve}`, x, y + 38, 18, '#93a0ab', 'right');
+    if (w.def.kind === 'beam') {
+      this.text(w.overheat ? 'OVERHEAT' : 'HEAT', x - 170, y + 30, 12, w.overheat ? DANGER : '#93a0ab');
+      this.bar(x - 170, y + 40, 165, 6, w.heat, w.overheat ? DANGER : w.heat > 0.7 ? WARN : HUD_C);
+    } else {
+      this.text(`${w.mag}`, x - 60, y + 34, 38, w.mag === 0 ? DANGER : '#e9eef2', 'right', 700);
+      this.text(`/ ${w.reserve}`, x, y + 38, 18, '#93a0ab', 'right');
+    }
     if (w.reloadT > 0) {
       this.text('RELOADING', x - 120, y + 64, 12, WARN, 'center');
       this.bar(x - 200, y + 74, 160, 3, 1 - w.reloadT / w.def.reload, WARN);
     }
     this.text(`GRENADES ${'●'.repeat(p.grenades)}${'○'.repeat(Math.max(0, 2 - p.grenades))}`, x, y + 88, 12, '#93a0ab', 'right');
-    const names = p.weapons.map((ws, i) => `${i + 1} ${ws.def.short}`);
-    names.forEach((n, i) => this.text(n, x - 232 + i * 76, y - 36, 12, i === p.cur ? WARN : '#8a96a0', 'left', 700));
+    const names = p.weapons.map((ws, i) => `${this.game.keyLabel('weapon' + (i + 1))} ${ws.def.short}`);
+    names.forEach((n, i) => this.text(n, x - 232 + i * 100, y - 36, 12, i === p.cur ? WARN : '#8a96a0', 'left', 700));
   }
 
   drawDamage(cx, cy, dt) {
@@ -453,6 +458,7 @@ export class HUD {
     if (p.grab) {
       const c = p.pushCharge;
       this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : `HOLD ${game.keyLabel('up')}: PUSH OFF TOWARDS AIM   ${game.keyLabel('grab')}: RELEASE`, cx, cy + 120, 13, OK, 'center', 700);
+      if (p.grab.kind !== 'pod' && !c) this.text('MOVE KEYS: CRAWL ALONG THE SURFACE (NO GAS)', cx, cy + 138, 11, OK, 'center');
       if (p.grab.kind === 'pod' && !c) this.text(`MOVE KEYS: HAUL POD (${(p.mass + p.grab.obj.mass).toFixed(0)} kg combined)`, cx, cy + 138, 11, OK, 'center');
       if (c > 0) this.bar(cx - 80, cy + 132, 160, 4, c, OK);
     } else {
