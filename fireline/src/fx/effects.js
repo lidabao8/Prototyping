@@ -243,7 +243,7 @@ export class Effects {
     this.smoke = new Particles(scene, 3000, getTexture('smoke'), false);
     this.glow = new Particles(scene, 2500, getTexture('spark'), true);
     this.flashes = new Particles(scene, 200, getTexture('flash'), true);
-    this.tracers = new Tracers(scene, 500);
+    this.tracers = new Tracers(scene, 1400);
     this.holes = new Decals(scene, 450, 'bullethole', 0.13);
     this.scorch = new Decals(scene, 60, 'scorch', 4.2);
     this.debris = new Debris(scene, 500);

@@ -13,7 +13,14 @@ export const DIFFICULTY = {
 };
 
 const PREF_RANGE = { smg: 14, shotgun: 9, carbine: 26, ar: 34, lmg: 40, dmr: 75, sniper: 130, pistol: 12 };
-const ENGAGE_RANGE = { smg: 75, shotgun: 40, carbine: 150, ar: 180, lmg: 190, dmr: 280, sniper: 420, pistol: 50 };
+const ENGAGE_RANGE = { smg: 70, shotgun: 36, carbine: 135, ar: 160, lmg: 180, dmr: 300, sniper: 450, pistol: 45 };
+// How far a bot will actually open fire with its weapon; magnified optics stretch it.
+export function fireRange(g) {
+  if (!g) return 40;
+  let r = ENGAGE_RANGE[g.stats.type] || 140;
+  if (g.stats.zoom >= 3.5) r *= 1.3; else if (g.stats.zoom >= 1.9) r *= 1.12;
+  return r;
+}
 const _v = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3();
 
 export class BotBrain {
@@ -127,7 +134,7 @@ export class BotBrain {
       k.aw = Math.min(1.6, k.aw + vis * dt * (recentlyKnown ? 9 : 4.5));
       if (k.aw >= 1) {
         k.vis = true; k.x = e.pos.x; k.y = e.pos.y; k.z = e.pos.z; k.t = now; k.seenT = now; k.headOnly = !losBody; k.bodyOnly = !losHead;
-        if (e.spotUntil < now && Math.random() < dt * 0.6) e.spotUntil = now + 4;
+        if (e.spotUntil < now && dist < 110 && Math.random() < dt * 0.6) e.spotUntil = now + 4;
         if (s.squad) for (const m of s.squad.members) if (m !== s && m.brain && m.state === 'alive' && m.pos.distanceTo(s.pos) < 120) m.brain.inform(e, e.pos.x, e.pos.y, e.pos.z, false, now - 0.4);
       }
     }
@@ -172,7 +179,8 @@ export class BotBrain {
     let react = this.d.react * rand(0.8, 1.35) * (d > 90 ? 1.25 : 1) * (off > 60 ? 1.35 : 1);
     if (prev && prev.state === 'alive' && now - (this.known.get(prev)?.seenT ?? -99) < 1) react *= 0.6; // already in a fight
     this.reactT = react;
-    const mag = this.d.err0 * rand(0.6, 1.4) * (1 + d / 140) * (1 + Math.hypot(e.vel.x, e.vel.z) / 8) * DEG;
+    const zoom = s.gun ? Math.max(1, s.gun.stats.zoom) : 1;
+    const mag = this.d.err0 * rand(0.6, 1.4) * (1 + d / (zoom >= 3.5 ? 220 : 120)) * (1 + Math.hypot(e.vel.x, e.vel.z) / 8) * DEG;
     const a = rand(0, Math.PI * 2);
     this.errY = Math.cos(a) * mag; this.errP = Math.sin(a) * mag * 0.7;
     const sniper = s.gun && (s.gun.stats.type === 'sniper' || s.gun.stats.type === 'dmr');
@@ -261,16 +269,20 @@ export class BotBrain {
     if (s.active === 1 && s.slots[0].mag + s.slots[0].reserve > 0 && !threatVisible) s.switchTo(0);
     if (s.active >= 2 && !this.gadgetTask && s.actionT <= 0) s.switchTo(0);
     // revive
-    if (!threatVisible && !this.reviveMate) {
+    const underFire = now - s.lastDamage < 2.5;
+    if (!this.reviveMate && !underFire) {
       const range = s.isMedic ? 50 : 26;
       let best = null, bd = 1e9;
       for (const m of this.game.teams[s.team]) {
         if (m.state !== 'downed' || m === s) continue;
+        // only go for others when nothing is in sight; the human player gets priority even mid-fight
+        if (threatVisible && !m.isPlayer) continue;
         const d = m.pos.distanceTo(s.pos);
-        const lim = (m.squad === s.squad ? range * 1.3 : range);
+        let lim = (m.squad === s.squad ? range * 1.3 : range);
+        if (m.isPlayer) lim = (s.isMedic ? 95 : 60) * (m.squad === s.squad ? 1.3 : 1);
         if (d > lim || (m.reviver && m.reviver !== s && m.reviver.state === 'alive')) continue;
         if (m.downedHp < 15 && d > 15) continue;
-        const sc = d * (m.squad === s.squad ? 0.7 : 1) * (m.isPlayer ? 0.6 : 1);
+        const sc = d * (m.squad === s.squad ? 0.7 : 1) * (m.isPlayer ? 0.3 : 1);
         if (sc < bd) { bd = sc; best = m; }
       }
       if (best) { this.reviveMate = best; best.reviver = s; this.path = null; this.smokeThrown = false; }
@@ -282,10 +294,10 @@ export class BotBrain {
     }
     if (this.healMate && (this.healMate.state !== 'alive' || this.healMate.hp >= 95 && this.healMate.bleed <= 0)) this.healMate = null;
     // state
-    const eng = ENGAGE_RANGE[g ? g.stats.type : 'ar'] || 150;
+    const eng = fireRange(g);
     const tDist = tk ? Math.hypot(tk.x - s.pos.x, tk.z - s.pos.z) : 1e9;
     const relevant = tk && ((tk.vis && tDist < eng * 1.15) || (now - tk.t < 7 && tDist < Math.min(80, eng)) || (now - s.lastDamage < 3));
-    if (this.reviveMate && (!threatVisible || (tk && s.pos.distanceTo(this.target.pos) > 60))) this.state = 'revive';
+    if (this.reviveMate && (!threatVisible || (tk && s.pos.distanceTo(this.target.pos) > (this.reviveMate.isPlayer ? 22 : 60)))) this.state = 'revive';
     else if (relevant) this.state = 'combat';
     else if (this.healMate) this.state = 'heal';
     else this.state = 'objective';
@@ -383,6 +395,19 @@ export class BotBrain {
     this.wantStance = 'stand';
     if (visible) {
       this.lostT = 0;
+      // too far for this weapon: don't trade shots; attackers close in, defenders stay low and wait
+      if (dist > fireRange(g) * 0.95) {
+        if (this.game.squads.orderType(s) !== 'defend' || dist < fireRange(g) * 1.5) {
+          const obj = this.game.squads.objectiveFor(s);
+          const toObj = Math.hypot(obj.x - s.pos.x, obj.z - s.pos.z);
+          const gx = toObj > obj.r ? obj.x : e.pos.x, gz = toObj > obj.r ? obj.z : e.pos.z;
+          const [wx, wz] = this.followTo(gx, gz, dt);
+          this.wantStance = 'stand';
+          return [wx, wz, false, false];
+        }
+        this.wantStance = 'crouch';
+        return [0, 0, false, false];
+      }
       // seek cover against this threat
       this.coverSearchT -= dt;
       const underFire = s.suppression > 0.25 || now - s.lastDamage < 1.5;
@@ -450,7 +475,13 @@ export class BotBrain {
       // don't strafe into walls/water
       const c = nav.cellOf(s.pos.x + wx * 1.2, s.pos.z + wz * 1.2);
       if (!nav.walkable(c) || nav.isWater(c)) { wx = -wx; wz = -wz; this.strafeDir *= -1; }
-      if (dist > 70 && g && ['lmg', 'dmr', 'sniper'].includes(g.stats.type) && s.suppression < 0.6) { this.wantStance = 'prone'; return [0, 0, false, false]; }
+      if (dist > 70 && g && ['lmg', 'dmr', 'sniper'].includes(g.stats.type) && s.suppression < 0.6) {
+        // only go prone if we can still see the target from down there
+        const hs = e.hitSpheres(), coll = this.game.world.collision;
+        if (coll.los(s.pos.x, s.pos.y + 0.45, s.pos.z, hs[1][0], hs[1][1], hs[1][2]) || coll.los(s.pos.x, s.pos.y + 0.45, s.pos.z, hs[0][0], hs[0][1], hs[0][2])) { this.wantStance = 'prone'; return [0, 0, false, false]; }
+        if (coll.los(s.pos.x, s.pos.y + 1.1, s.pos.z, hs[1][0], hs[1][1], hs[1][2])) { this.wantStance = 'crouch'; return [0, 0, false, false]; }
+        this.wantStance = 'stand'; return [0, 0, false, false];
+      }
       if (dist > 40 && Math.random() < 0.5) this.wantStance = 'crouch';
       if (this.crouchSpamT > 0) this.wantStance = 'crouch';
       return [wx, wz, false, false];
@@ -601,10 +632,11 @@ export class BotBrain {
       const dx = tx - eye.x, dy = ty - eye.y, dz = tz - eye.z;
       const yawT = Math.atan2(-dx, -dz), pitchT = Math.atan2(dy, Math.hypot(dx, dz));
       // error decay & jitter
-      const k = Math.exp(-dt / this.d.errTau);
+      const k = Math.exp(-dt / (this.d.errTau * (g && g.stats.zoom >= 3.5 ? 0.7 : 1)));
       this.errY *= k; this.errP *= k;
       const moving = Math.hypot(s.vel.x, s.vel.z) > 1 ? 1.6 : 1;
-      const jit = this.d.jitter * DEG * moving * (1 + s.suppression * 2.2 + s.flashed * 6);
+      const optic = g ? Math.sqrt(Math.max(1, g.stats.zoom)) : 1;
+      const jit = this.d.jitter * DEG * moving * (1 + s.suppression * 2.2 + s.flashed * 6) * (1 + dist / 260) / Math.pow(g ? Math.max(1, g.stats.zoom) : 1, 0.8);
       const jy = (Math.sin(now * 2.3 + this.ph1) + Math.sin(now * 5.1 + this.ph2) * 0.5) * jit * 0.6;
       const jp = (Math.sin(now * 2.9 + this.ph2) + Math.sin(now * 4.3 + this.ph1) * 0.5) * jit * 0.45;
       const wantY = yawT + this.errY + jy, wantP = pitchT + this.errP + jp;
@@ -616,9 +648,11 @@ export class BotBrain {
       const curY = this.aiYaw + this.recoilOffY, curP = this.aiPitch + this.recoilOff;
       const angErr = Math.hypot(wrapAngle(curY - yawT), curP - pitchT);
       const radius = part === 'head' ? 0.14 : 0.3;
-      const tol = Math.max(0.35 * DEG, Math.atan(radius / Math.max(dist, 1)) * (dist < 15 ? 2.6 : 1.6));
+      const scoped = g && g.stats.zoom >= 3.5;
+      const floor = scoped ? 0.07 : lerp(0.35, 0.13, clamp(dist / 150, 0, 1));
+      const tol = Math.max(floor * DEG, Math.atan(radius / Math.max(dist, 1)) * (dist < 15 ? 2.6 : 1.5));
       this.reactT -= dt;
-      fireOk = this.reactT <= 0 && angErr < tol * (this.burstLeft > 0 ? 2.2 : 1);
+      fireOk = this.reactT <= 0 && angErr < tol * (this.burstLeft > 0 ? 2.2 : 1) && dist <= fireRange(g);
       if (e.state === 'downed' && [...this.known.values()].filter(k => k.vis).length > 1) fireOk = false;
       this.handleTrigger(dt, fireOk, dist, now);
       s.input.ads = !!g && (dist > 14 || g.stats.type === 'sniper' || g.stats.type === 'dmr') && s.reloadT <= 0;

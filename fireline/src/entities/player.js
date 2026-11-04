@@ -5,6 +5,19 @@ import { clamp, lerp, damp, DEG } from '../core/math.js';
 import { G } from '../render/geo.js';
 import * as _THREE from 'three';
 const _ae = new _THREE.Vector3();
+// Keyframe interpolation with smoothstep easing; values may be numbers or arrays.
+function kf(keys, t) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) {
+    const [t1, v1] = keys[i];
+    if (t <= t1) {
+      const [t0, v0] = keys[i - 1];
+      let u = t1 > t0 ? (t - t0) / (t1 - t0) : 1; u = u * u * (3 - 2 * u);
+      return Array.isArray(v0) ? v0.map((a, j) => a + (v1[j] - a) * u) : v0 + (v1 - v0) * u;
+    }
+  }
+  return keys[keys.length - 1][1];
+}
 const lift = (hx) => new _THREE.Color(hx).lerp(new _THREE.Color(0x7a7a7a), 0.25).getHex();
 import { TEAM_COLORS, buildWeaponGeo, buildGadgetGeo } from './models.js';
 import { keybinds, keyName } from '../core/keybinds.js';
@@ -47,9 +60,9 @@ function lensTexture() {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d');
   const grd = g.createRadialGradient(S * 0.5, S * 0.5, S * 0.1, S * 0.5, S * 0.5, S * 0.5);
-  grd.addColorStop(0, 'rgba(120,170,220,0.10)'); grd.addColorStop(0.8, 'rgba(90,130,190,0.30)'); grd.addColorStop(1, 'rgba(40,60,90,0.65)');
+  grd.addColorStop(0, 'rgba(150,190,230,0.05)'); grd.addColorStop(0.75, 'rgba(120,160,210,0.12)'); grd.addColorStop(1, 'rgba(50,70,100,0.45)');
   g.fillStyle = grd; g.fillRect(0, 0, S, S);
-  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 6; g.beginPath(); g.arc(S * 0.5, S * 0.5, S * 0.33, Math.PI * 1.1, Math.PI * 1.45); g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 5; g.beginPath(); g.arc(S * 0.5, S * 0.5, S * 0.36, Math.PI * 1.1, Math.PI * 1.4); g.stroke();
   lensTex = new THREE.CanvasTexture(c); lensTex.colorSpace = THREE.SRGBColorSpace;
   return lensTex;
 }
@@ -102,7 +115,7 @@ export class PlayerController {
       if (w.stats.type === 'pistol') gripL.set(-0.02, -0.04, 0.02);
       this.sightY = m.sightY; this.sightZ = m.sightZ; this.muzzle = m.muzzle.clone();
       // glass on every optic
-      if (!this.glassMat) this.glassMat = new THREE.MeshStandardMaterial({ map: lensTexture(), transparent: true, depthWrite: false, roughness: 0.05, metalness: 0.85, envMapIntensity: 1.6, side: THREE.DoubleSide });
+      if (!this.glassMat) this.glassMat = new THREE.MeshBasicMaterial({ map: lensTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
       this.vmLenses = new THREE.Group();
       for (const L of m.lenses || []) {
         const gl = L.type === 'rect' ? new THREE.PlaneGeometry(L.w, L.h) : new THREE.CircleGeometry(L.r, 20);
@@ -180,7 +193,12 @@ export class PlayerController {
     if (canControl) {
       if (K.down(inp, 'forward')) si.mz -= 1; if (K.down(inp, 'back')) si.mz += 1;
       if (K.down(inp, 'left')) si.mx -= 1; if (K.down(inp, 'right')) si.mx += 1;
-      const sprintKey = K.down(inp, 'sprint');
+      let sprintKey = K.down(inp, 'sprint');
+      if (S.get('sprintMode') === 'toggle') {
+        if (K.hit(inp, 'sprint') && !(s.adsT > 0.5)) this.sprintToggle = !this.sprintToggle;
+        if (si.mz > -0.3 || s.adsT > 0.5 || s.stance === 'prone') this.sprintToggle = false;
+        sprintKey = !!this.sprintToggle || (s.adsT > 0.5 && K.down(inp, 'sprint')); // still holds breath when scoped
+      }
       si.sprint = (sprintKey || (S.get('autoSprint') && si.mz < -0.5 && Math.abs(si.mx) < 0.5)) && !(s.adsT > 0.5) && !si.ads;
       s.autoRepeat = !!S.get('semiAutoRepeat');
       if (K.hit(inp, 'jump')) si.jump = true;
@@ -250,41 +268,50 @@ export class PlayerController {
     if (ui) { ui.giveUp = this.giveUpT / 1.5; }
   }
 
-  // ---- aim assist: only onto enemies that are actually visible ----
+  // ---- aim assist: only ever onto enemies you can actually see right now ----
   aimAssistTarget(dt) {
     const S = this.game.settings, level = S.get('aimAssist');
-    if (!level || level === 'off') return null;
-    const cfg = { low: { cone: 2.4, fric: 0.3, pull: 1.4, snap: 0.35 }, medium: { cone: 3.8, fric: 0.45, pull: 2.6, snap: 0.55 }, high: { cone: 5.5, fric: 0.6, pull: 4.2, snap: 0.75 } }[level];
-    if (!cfg) return null;
+    if (!level || level === 'off') { this.aaTarget = null; return null; }
+    const cfg = {
+      low: { cone: 2.6, fric: 0.32, pull: 1.6, snap: 0.4, track: 0.35 },
+      medium: { cone: 4.0, fric: 0.48, pull: 2.8, snap: 0.6, track: 0.55 },
+      high: { cone: 5.8, fric: 0.62, pull: 4.4, snap: 0.8, track: 0.75 },
+    }[level];
     const s = this.s, g = this.game;
-    if (!s.gun || s.sprinting) return null;
+    if (!cfg || !s.gun || s.sprinting || s.state !== 'alive') { this.aaTarget = null; return null; }
     const eye = s.eye(_ae), cp = Math.cos(s.pitch);
     const dx0 = -Math.sin(s.yaw) * cp, dy0 = Math.sin(s.pitch), dz0 = -Math.cos(s.yaw) * cp;
-    this._aaT = (this._aaT || 0) - dt;
     const ads = s.adsT > 0.5;
+    const coll = g.world.collision, now = g.time;
+    this.aaVis = this.aaVis || new Map();
     let best = null, bestScore = 1e9;
     for (const e of g.teams[1 - s.team]) {
       if (e.state !== 'alive') continue;
       const hs = e.hitSpheres(), c = hs[1];
       const tx = c[0] - eye.x, ty = c[1] - eye.y, tz = c[2] - eye.z;
       const d = Math.hypot(tx, ty, tz);
-      if (d > (ads ? 160 : 70) || d < 0.5) continue;
+      if (d > (ads ? 170 : 75) || d < 0.5) continue;
       const ang = Math.acos(Math.max(-1, Math.min(1, (tx * dx0 + ty * dy0 + tz * dz0) / d))) / DEG;
-      const cone = cfg.cone * Math.max(0.6, Math.min(2.2, 25 / d)) * (ads ? 1.2 : 1);
-      if (ang > cone * 1.7) continue;
-      const score = ang / cone;
-      if (score < bestScore) { bestScore = score; best = { e, ang, cone, d, x: c[0], y: c[1], z: c[2] }; }
+      const cone = cfg.cone * Math.max(0.6, Math.min(2.4, 25 / d)) * (ads ? 1.2 : 1);
+      if (ang > cone * 1.8) continue;
+      // visibility: body or head must be in clear line of sight and not hidden by smoke/foliage
+      let v = this.aaVis.get(e);
+      if (!v || now - v.t > 0.05) {
+        const body = coll.los(eye.x, eye.y, eye.z, c[0], c[1], c[2]) && coll.softVisibility(eye.x, eye.y, eye.z, c[0], c[1], c[2], now) > 0.35;
+        const head = coll.los(eye.x, eye.y, eye.z, hs[0][0], hs[0][1], hs[0][2]) && coll.softVisibility(eye.x, eye.y, eye.z, hs[0][0], hs[0][1], hs[0][2], now) > 0.35;
+        v = { t: now, body, head };
+        this.aaVis.set(e, v);
+      }
+      if (!v.body && !v.head) continue;
+      const pt = v.body ? c : hs[0];
+      const score = (ang / cone) * (e === this.aaTarget ? 0.65 : 1) + d * 0.002;
+      if (score < bestScore) { bestScore = score; best = { e, ang, cone, d, x: pt[0], y: pt[1], z: pt[2] }; }
     }
     if (!best) { this.aaTarget = null; return null; }
-    // visibility check (cached briefly per target)
-    if (this.aaTarget !== best.e || this._aaT <= 0) {
-      const hs = best.e.hitSpheres(), coll = g.world.collision;
-      const vis = (coll.los(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2]) || coll.los(eye.x, eye.y, eye.z, hs[0][0], hs[0][1], hs[0][2])) && coll.softVisibility(eye.x, eye.y, eye.z, hs[1][0], hs[1][1], hs[1][2], g.time) > 0.25;
-      this.aaVisible = vis; this.aaTarget = best.e; this._aaT = 0.12;
-    }
-    if (!this.aaVisible) return null;
+    if (best.e !== this.aaTarget) { this.aaTarget = best.e; this.aaPrev = null; }
     const inCone = best.ang < best.cone;
-    best.friction = inCone ? 1 - cfg.fric * (1 - best.ang / best.cone) : 1;
+    const f = inCone ? 1 - best.ang / best.cone : 0;
+    best.friction = 1 - cfg.fric * f * f * (3 - 2 * f);
     best.cfg = cfg; best.inCone = inCone;
     return best;
   }
@@ -296,13 +323,19 @@ export class PlayerController {
     const wantYaw = Math.atan2(-dx, -dz), wantPitch = Math.atan2(dy, Math.hypot(dx, dz));
     let dyaw = wantYaw - s.yaw; while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
     const dp = wantPitch - s.pitch;
-    // snap when aiming down sights onto a nearby target
+    // snap when you bring the sights up near a visible target
     if (s.adsT > 0.3 && !this.wasAds && t.ang < t.cone * 1.6) { s.yaw += dyaw * t.cfg.snap; s.pitch += dp * t.cfg.snap; }
     this.wasAds = s.adsT > 0.3;
+    // tracking: follow the target's angular motion (theirs and yours) while it is under the crosshair
+    if (this.aaPrev && t.inCone && dt > 0) {
+      let wy = wantYaw - this.aaPrev.y; while (wy > Math.PI) wy -= Math.PI * 2; while (wy < -Math.PI) wy += Math.PI * 2;
+      const wp = wantPitch - this.aaPrev.p;
+      if (Math.abs(wy) < 0.2 && Math.abs(wp) < 0.2) { s.yaw += wy * t.cfg.track; s.pitch += wp * t.cfg.track * 0.6; }
+    }
+    this.aaPrev = { y: wantYaw, p: wantPitch };
     if (!t.inCone) return;
-    // gentle pull, stronger while aiming down sights or moving relative to the target
-    const rel = Math.hypot(s.vel.x - t.e.vel.x, s.vel.z - t.e.vel.z);
-    const k = 1 - Math.exp(-t.cfg.pull * dt * (s.adsT > 0.5 ? 1 : 0.5) * (0.4 + Math.min(1, rel / 3)));
+    // gentle pull toward the visible part, stronger when aimed
+    const k = 1 - Math.exp(-t.cfg.pull * dt * (s.adsT > 0.5 ? 1 : 0.55));
     s.yaw += dyaw * k; s.pitch += dp * k * 0.6;
   }
 
@@ -407,6 +440,8 @@ export class PlayerController {
     this.camRoll = damp(this.camRoll, -s.lean * 0.17 + (s.state === 'downed' ? 0.35 : 0), 10, dt);
     cam.rotation.order = 'YXZ';
     cam.rotation.set(s.pitch + s.swayP + shP, s.yaw + s.swayY + shY + bobX * 0.15, this.camRoll + shR);
+    // remember the non-aim camera offsets so shots fired next frame go exactly through the screen
+    this.camOff = { p: shP, y: shY + bobX * 0.15, r: this.camRoll + shR, dy: bobY - this.landDip };
     // FOV
     const g = s.gun;
     const binos = s.weapon && s.weapon.id === 'binoculars';
@@ -458,25 +493,65 @@ export class PlayerController {
     if (sb > 0.001) { p.x += 0.03 * sb; p.y -= 0.06 * sb; rx -= 0.35 * sb; ry += 0.65 * sb; p.y += Math.sin(this.bobPhase * 2) * 0.012 * sb; }
     this.crouchBlend = damp(this.crouchBlend || 0, s.stance === 'stand' ? 0 : 1, 7, dt);
     p.y += 0.008 * this.crouchBlend; rz += 0.04 * this.crouchBlend * (1 - ads);
-    // reload: tilt the weapon, drop the magazine, bring a fresh one up with the left hand
+    // reload: keyframed choreography (present well, release, pull, fresh mag, seat, rack, settle)
     let magOff = null, armOff = null;
+    this.magFall = this.magFall || null;
     if (s.reloadT > 0 && isGun) {
       const tot = s.reloadTotal || 2; const k = Math.min(1, 1 - s.reloadT / tot);
-      const tilt = Math.sin(k * Math.PI);
-      p.y -= 0.06 * tilt; rz += 0.45 * tilt; rx += 0.06 * tilt; p.x -= 0.03 * tilt;
-      if (this.vmMag && !w.stats.shellReload) {
-        if (k < 0.22) magOff = [0, -0.35 * (k / 0.22) ** 2, 0.05 * (k / 0.22), 0.6 * (k / 0.22)];
-        else if (k < 0.42) magOff = [0, -0.5, 0.0, 0.0];
-        else if (k < 0.7) { const u = (k - 0.42) / 0.28; magOff = [0, -0.22 * (1 - u) * (1 - u), 0.03 * (1 - u), 0.15 * (1 - u)]; }
-        else magOff = [0, 0, 0, 0];
-        const handT = k < 0.15 ? k / 0.15 : k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25;
-        const mp = this.magPos, gl = this.gripL;
-        const follow = k > 0.42 && k < 0.7 ? magOff[1] : k < 0.42 ? -0.18 : 0;
-        armOff = [(mp.x - gl.x) * handT, (mp.y - 0.06 - gl.y + follow) * handT, (mp.z - gl.z) * handT];
-        if (k > 0.78 && k < 0.95 && s.reloadTotal > (w.stats.reload + 0.01)) { const u = (k - 0.78) / 0.17; p.z += 0.03 * Math.sin(u * Math.PI); rx -= 0.05 * Math.sin(u * Math.PI); }
-      } else if (w.stats.shellReload) {
-        const cyc = (game.time * 3) % 1;
-        armOff = [0.02, -0.08 * Math.sin(cyc * Math.PI), 0.12];
+      const empty = !!s.reloadEmpty;
+      if (this._reloadId !== s.reloadStart) { this._reloadId = s.reloadStart; this._rlSnd = {}; this.magFall = null; }
+      const snd = (key, at, name, opt) => { if (k >= at && !this._rlSnd[key]) { this._rlSnd[key] = true; game.audio.play2d(name, opt || { vol: 0.5 }); } };
+      if (w.stats.shellReload) {
+        // shotgun: roll the gun, feed shells one by one from below into the loading port
+        const roll = kf([[0, 0], [0.12, 1], [0.88, 1], [1, 0]], k);
+        rz += 0.5 * roll; p.y -= 0.03 * roll; p.x -= 0.02 * roll; ry -= 0.12 * roll;
+        const cyc = ((tot - s.reloadT) / (w.stats.reload || 0.55)) % 1;
+        armOff = [0.03 * roll, (-0.12 + 0.12 * Math.sin(cyc * Math.PI)) * roll, (0.16 + 0.04 * Math.sin(cyc * Math.PI)) * roll];
+      } else {
+        const T = empty
+          ? { present: 0.1, release: 0.18, out: 0.28, gone: 0.38, up: 0.5, seat: 0.6, rack0: 0.7, rack1: 0.8, done: 0.92 }
+          : { present: 0.12, release: 0.2, out: 0.3, gone: 0.4, up: 0.54, seat: 0.66, rack0: 0.7, rack1: 0.7, done: 0.88 };
+        // weapon pose
+        const tilt = kf([[0, 0], [T.present, 1], [T.seat, 1], [T.seat + 0.03, 0.88], [T.rack0, 0.9], [T.done, 0], [1, 0]], k);
+        const turn = kf([[0, 0], [T.present, 1], [T.seat + 0.02, 1], [T.done, 0]], k);
+        const bump = kf([[0, 0], [T.seat - 0.015, 0], [T.seat, 1], [T.seat + 0.05, 0], [1, 0]], k);
+        rz += 0.5 * tilt; ry -= 0.2 * turn; rx += 0.07 * tilt + 0.05 * bump;
+        p.y -= 0.035 * tilt - 0.018 * bump; p.x -= 0.03 * tilt; p.z += 0.02 * turn;
+        if (empty) {
+          const rack = kf([[0, 0], [T.rack0, 0], [T.rack0 + 0.04, 1], [T.rack1, 1], [T.rack1 + 0.03, 0], [1, 0]], k);
+          rz -= 0.65 * rack; rx += 0.06 * rack;
+          const pull = kf([[0, 0], [T.rack1 - 0.04, 0], [T.rack1, 1], [T.rack1 + 0.04, 0], [1, 0]], k);
+          p.z += 0.035 * pull;
+        }
+        // hand path relative to its rest grip on the handguard
+        const mp = this.magPos || new THREE.Vector3(), gl = this.gripL;
+        const atMag = [mp.x - gl.x - 0.01, mp.y - gl.y - 0.05, mp.z - gl.z + 0.01];
+        const below = [atMag[0] - 0.08, atMag[1] - 0.34, atMag[2] + 0.12];
+        const handle = [0.02 - gl.x, 0.09 - gl.y, 0.02 - gl.z + 0.06];
+        const keys = [[0, [0, 0, 0]], [T.present, atMag], [T.release, atMag], [T.out, [atMag[0], atMag[1] - 0.08, atMag[2]]], [T.gone, below], [T.up - 0.06, below], [T.up, [atMag[0], atMag[1] - 0.1, atMag[2] + 0.02]], [T.seat, atMag], [T.seat + 0.04, atMag]];
+        if (empty) keys.push([T.rack0, handle], [T.rack1, [handle[0], handle[1], handle[2] + 0.06]], [T.done, [0, 0, 0]]);
+        else keys.push([T.done, [0, 0, 0]]);
+        keys.push([1, [0, 0, 0]]);
+        armOff = kf(keys, k);
+        // magazine: in the well, sliding out, falling (empty) or carried away, then the fresh one rides up with the hand
+        if (this.vmMag) {
+          const handD = [armOff[0] - atMag[0], armOff[1] - atMag[1], armOff[2] - atMag[2]];
+          if (k < T.release) magOff = [0, 0, 0, 0];
+          else if (k < T.out) { const u = (k - T.release) / (T.out - T.release); magOff = [0, -0.08 * u * u, 0, 0]; }
+          else if (k < T.up - 0.06) {
+            if (empty) {
+              if (!this.magFall) this.magFall = { t: 0 };
+              this.magFall.t += dt;
+              const ft = this.magFall.t; magOff = [0.02 * ft, -0.08 - 4.5 * ft * ft, 0.12 * ft, 3 * ft];
+            } else magOff = [handD[0], -0.08 + handD[1], handD[2], 0.3];
+          }
+          else if (k < T.seat) magOff = [handD[0], handD[1], handD[2], 0.25 * (1 - (k - (T.up - 0.06)) / (T.seat - T.up + 0.06))];
+          else magOff = [0, 0, 0, 0];
+        }
+        snd('out', T.release, 'magOut', { vol: 0.55 });
+        if (empty) snd('drop', T.out + 0.08, 'impactMetal', { vol: 0.12, rate: 1.4 });
+        snd('in', T.seat, 'magIn', { vol: 0.6 });
+        if (empty) snd('rack', T.rack1, 'bolt', { vol: 0.55 });
       }
     }
     // bolt / pump cycling after a shot
@@ -506,7 +581,7 @@ export class PlayerController {
       else { p.y -= 0.12 * Math.sin(k * Math.PI); rz -= 0.3 * Math.sin(k * Math.PI); }
     }
     if (this.vmMag && this.magPos) {
-      if (magOff) { this.vmMag.position.set(this.magPos.x + magOff[0], this.magPos.y + magOff[1], this.magPos.z + magOff[2]); this.vmMag.rotation.x = magOff[3]; this.vmMag.visible = !(magOff[1] <= -0.49); }
+      if (magOff) { this.vmMag.position.set(this.magPos.x + magOff[0], this.magPos.y + magOff[1], this.magPos.z + magOff[2]); this.vmMag.rotation.x = magOff[3]; this.vmMag.visible = magOff[1] > -0.6; }
       else { this.vmMag.position.copy(this.magPos); this.vmMag.rotation.x = 0; this.vmMag.visible = true; }
     }
     if (this.vmArmLGroup) {
@@ -533,9 +608,35 @@ export class PlayerController {
     this.updateMuzzleWorld();
   }
 
+  // Angular offset (camera space) of the sight's aim point on screen, so aimed shots go through the dot.
+  updateReticleAim() {
+    const s = this.s, w = s.weapon;
+    this.retAx = 0; this.retAy = 0;
+    if (!this.vmRoot.visible || !w || w.kind !== 'gun' || s.adsT < 0.5 || this.sightY === undefined) return;
+    const pt = new THREE.Vector3(0, this.sightY, (this.reticle ? this.reticle.position.z : this.sightZ - 0.35));
+    if (!this.reticle && w.model && !w.model.pistol) pt.z = -w.model.len * 0.5; // iron sights: front post
+    pt.applyMatrix4(this.vmRoot.matrixWorld); // vm camera space
+    if (pt.z > -0.01) return;
+    const vm = this.vmCamera, cam = this.camera;
+    const tv = Math.tan(vm.fov * DEG / 2), tw = Math.tan(cam.fov * DEG / 2);
+    const ndcX = (pt.x / -pt.z) / (tv * vm.aspect), ndcY = (pt.y / -pt.z) / tv;
+    this.retAx = Math.atan(ndcX * tw * cam.aspect); this.retAy = Math.atan(ndcY * tw);
+  }
+
+  // World-space ray the player is aiming along: through the reticle when aimed, screen centre otherwise.
+  aimRay(origin, dir) {
+    const s = this.s, o = this.camOff || { p: 0, y: 0, r: 0, dy: 0 };
+    s.eye(origin); origin.y += o.dy;
+    const e = new THREE.Euler(s.pitch + s.swayP + o.p, s.yaw + s.swayY + o.y, o.r, 'YXZ');
+    dir.set(Math.tan(this.retAx || 0), Math.tan(this.retAy || 0), -1).normalize().applyEuler(e);
+    return dir;
+  }
+
   updateMuzzleWorld() {
     // compute viewmodel muzzle in world space (for tracers and flashes)
     const s = this.s;
+    this.vmRoot.updateMatrixWorld();
+    this.updateReticleAim();
     if (!this.muzzle) return;
     const local = this.muzzle.clone();
     this.vmRoot.updateMatrixWorld();

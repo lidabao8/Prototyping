@@ -21,8 +21,9 @@ export class Combat {
   // ---------------- bullets ----------------
   fireBullet(shooter, gun, pellet) {
     const s = gun.stats;
-    const eye = shooter.eye(new THREE.Vector3());
-    const dir = shooter.aimDir(new THREE.Vector3());
+    const eye = new THREE.Vector3(), dir = new THREE.Vector3();
+    if (shooter.isPlayer && this.game.playerCtl) this.game.playerCtl.aimRay(eye, dir); // exactly through the crosshair / red dot
+    else { shooter.eye(eye); shooter.aimDir(dir); }
     let spread = shooter.spread();
     if (s.pellets) spread = Math.max(spread, s.pelletSpread || 2.5) * (pellet === 0 ? 0.3 : 1);
     if (shooter.suppression > 0.2 && !shooter.isPlayer) spread += shooter.suppression * 0.8;
@@ -36,7 +37,8 @@ export class Combat {
     const vel = s.vel * s.velMul;
     const muzzle = shooter.isPlayer && shooter.vmMuzzle ? shooter.vmMuzzle : shooter.muzzleWorld(new THREE.Vector3());
     this.shotCounter++;
-    const tracer = !s.suppressed && (s.type === 'sniper' || s.type === 'lmg' || pellet === 0 && (this.shotCounter % (shooter.isPlayer ? 3 : 2) === 0));
+    // every bullet is visible as a streak; tracer rounds glow brighter, suppressed rounds stay faint
+    const tracer = !s.suppressed && (s.type === 'sniper' || s.type === 'lmg' || (pellet === 0 && this.shotCounter % (shooter.isPlayer ? 3 : 2) === 0));
     this.bullets.push({
       x: eye.x, y: eye.y, z: eye.z, vx: dir.x * vel, vy: dir.y * vel, vz: dir.z * vel,
       ox: muzzle.x - eye.x, oy: muzzle.y - eye.y, oz: muzzle.z - eye.z,
@@ -62,6 +64,7 @@ export class Combat {
       b.life -= dt;
       let remaining = dt;
       let alive = b.life > 0;
+      const tx0 = b.x, ty0 = b.y, tz0 = b.z;
       let guard = 0;
       while (alive && remaining > 0 && guard++ < 4) {
         const step = remaining; remaining = 0;
@@ -156,16 +159,27 @@ export class Combat {
         b.x = nx; b.y = ny; b.z = nz; b.traveled += L;
       }
       if (b.traveled > 1400 || Math.abs(b.x) > this.world.terrain.half || Math.abs(b.z) > this.world.terrain.half) alive = false;
-      // tracer
-      if (b.tracer) {
-        const sp = Math.hypot(b.vx, b.vy, b.vz);
-        const tl = Math.min(b.traveled, sp * 0.03);
+      // sniper (and DMR) rounds leave a vapour trail through the air
+      if (b.s.type === 'sniper' || b.s.type === 'dmr') {
+        const L = Math.hypot(b.x - tx0, b.y - ty0, b.z - tz0);
+        const n = Math.min(26, Math.ceil(L / (b.s.type === 'sniper' ? 1.4 : 2.6) * fx.q));
+        const strong = b.s.type === 'sniper' ? 0.36 : 0.18;
+        for (let k = 0; k < n; k++) {
+          const u = (k + Math.random()) / n;
+          fx.smoke.emit(tx0 + (b.x - tx0) * u, ty0 + (b.y - ty0) * u, tz0 + (b.z - tz0) * u, (Math.random() - 0.5) * 0.15, 0.06, (Math.random() - 0.5) * 0.15, b.s.type === 'sniper' ? 1.8 : 1.1, 0.04, 0.32, [0.88, 0.88, 0.9, strong], [0.88, 0.88, 0.9, 0], 1.2, -0.03, 0);
+        }
+      }
+      // visible bullet streak (all rounds)
+      {
+        const sp = Math.hypot(b.vx, b.vy, b.vz) || 1;
+        const tl = Math.min(b.traveled, sp * (b.tracer ? 0.035 : 0.028));
         const k = 1 - Math.min(1, b.traveled / 40);
         const ex = b.x + b.ox * k, ey = b.y + b.oy * k, ez = b.z + b.oz * k;
         const k2 = 1 - Math.min(1, Math.max(0, b.traveled - tl) / 40);
         const sx = b.x - b.vx / sp * tl + b.ox * k2, sy = b.y - b.vy / sp * tl + b.oy * k2, sz = b.z - b.vz / sp * tl + b.oz * k2;
-        const col = b.team === 0 ? [1.0, 0.85, 0.5] : [1.0, 0.7, 0.4];
-        fx.tracers.add(sx, sy, sz, ex, ey, ez, col[0], col[1], col[2], 0.025);
+        if (b.tracer) { const col = b.team === 0 ? [1.0, 0.85, 0.5] : [1.0, 0.7, 0.4]; fx.tracers.add(sx, sy, sz, ex, ey, ez, col[0], col[1], col[2], b.s.type === 'sniper' ? 0.032 : 0.025); }
+        else if (b.s.suppressed) fx.tracers.add(sx, sy, sz, ex, ey, ez, 0.22, 0.21, 0.19, 0.01);
+        else fx.tracers.add(sx, sy, sz, ex, ey, ez, 0.62, 0.56, 0.44, 0.013);
       }
       if (!alive) this.bullets.splice(i, 1);
     }
@@ -544,23 +558,35 @@ export class Combat {
     if (best.brain) best.brain.onDamaged(s, f);
   }
 
-  // Spot enemies near the aim ray for the shooter's team.
+  // Spot enemies near the aim ray for the shooter's team. Range depends on what you're looking through.
+  spotRange(s) {
+    if (!s.isPlayer) return 100;
+    const w = s.weapon;
+    if (w && w.id === 'binoculars') return s.adsT > 0.5 ? 400 : 150;
+    const z = s.gun && s.adsT > 0.5 ? s.gun.stats.zoom : 1;
+    return z >= 6 ? 320 : z >= 3.5 ? 240 : z >= 1.9 ? 170 : 120;
+  }
+
   spot(s, dur = 6, cone = 5) {
-    const eye = s.eye(new THREE.Vector3()), dir = s.aimDir(new THREE.Vector3());
-    let found = 0;
+    const eye = new THREE.Vector3(), dir = new THREE.Vector3();
+    if (s.isPlayer && this.game.playerCtl) this.game.playerCtl.aimRay(eye, dir); else { s.eye(eye); s.aimDir(dir); }
+    const range = this.spotRange(s);
+    let found = 0, tooFar = 0;
     for (const e of this.game.soldiers) {
       if (e.team === s.team || e.state === 'dead') continue;
       const c = e.center(_v);
       const to = _m.set(c.x - eye.x, c.y - eye.y, c.z - eye.z);
       const d = to.length();
-      if (d > 450) continue;
+      if (d > 500) continue;
       to.divideScalar(d);
       const ang = Math.acos(clamp(to.dot(dir), -1, 1)) / DEG;
       if (ang > Math.max(cone, 60 / Math.max(d, 1))) continue;
       if (!this.world.collision.los(eye.x, eye.y, eye.z, c.x, c.y, c.z)) continue;
+      if (d > range) { tooFar++; continue; }
       e.spotUntil = this.game.time + dur; found++;
     }
-    if (found) { this.game.audio.play2d('beep', { vol: s.isPlayer ? 0.3 : 0 }); if (s.isPlayer) this.game.addScore(s, 0, found > 1 ? `SPOTTED ${found}` : 'SPOTTED'); }
+    if (found) { if (s.isPlayer) { this.game.audio.play2d('beep', { vol: 0.3 }); this.game.addScore(s, 0, found > 1 ? `SPOTTED ${found}` : 'SPOTTED'); } }
+    else if (tooFar && s.isPlayer) this.game.hud.toast(`Too far to spot · ${range}m max${s.adsT > 0.5 ? '' : ' (aim or use binoculars for more)'}`, 1.8);
     return found;
   }
 

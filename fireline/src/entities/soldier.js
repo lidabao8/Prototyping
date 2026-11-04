@@ -373,7 +373,7 @@ export class Soldier {
         const need = g.stats.mag - g.mag;
         const take = Math.min(need, g.reserve);
         g.mag += take; g.reserve -= take;
-        this.game.onReloadSound(this, 'magIn');
+        if (!this.isPlayer) this.game.onReloadSound(this, 'magIn');
       }
     }
     this.bloom = Math.max(0, this.bloom - dt * 6);
@@ -433,9 +433,11 @@ export class Soldier {
   reload() {
     const g = this.gun;
     if (!g || this.reloadT > 0 || g.mag >= g.stats.mag || g.reserve <= 0 || this.state !== 'alive' || this.actionT > 0) return false;
+    this.reloadEmpty = g.mag === 0;
     this.reloadT = g.stats.shellReload ? g.stats.reload + 0.3 : (g.mag === 0 ? g.stats.reloadEmpty : g.stats.reload);
     this.reloadTotal = this.reloadT;
-    this.game.onReloadSound(this, 'magOut');
+    this.reloadStart = (this.reloadStart || 0) + 1;
+    if (!this.isPlayer || g.stats.shellReload) this.game.onReloadSound(this, 'magOut');
     return true;
   }
 
@@ -570,7 +572,7 @@ export class Soldier {
       if (this.healT > 0) { const h = Math.min(this.healT, 30 * dt); this.healT -= h; this.heal(h); }
     } else if (this.state === 'downed') {
       this.downedTime += dt;
-      this.downedHp -= dt * 100 / 28;
+      this.downedHp -= dt * 100 / (this.isPlayer ? 40 : 28);
       if (this.downedHp <= 0) this.die(this.lastAttacker, 'Bled out', false, true);
     } else if (this.state === 'dead') this.deadTime += dt;
   }

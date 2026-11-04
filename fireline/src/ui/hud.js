@@ -157,10 +157,12 @@ export class HUD {
       this.order.innerHTML = `<b>${sq.name}</b> ${label}${sq.leader === p ? ` <span>[${keybinds.name('spot')}] give orders</span>` : ''}`;
     } else this.order.textContent = '';
     // scoreboard / big map
-    const showBoard = keybinds.down(g.input, 'scoreboard') && !g.uiBlocking();
+    if (g.settings.get('scoreboardMode') === 'toggle') { if (keybinds.hit(g.input, 'scoreboard')) this.boardOpen = !this.boardOpen; } else this.boardOpen = keybinds.down(g.input, 'scoreboard');
+    const showBoard = this.boardOpen && !g.uiBlocking();
     this.board.style.display = showBoard ? 'block' : 'none';
     if (showBoard) this.drawBoard();
-    const showMap = keybinds.down(g.input, 'map') && !g.uiBlocking();
+    if (g.settings.get('mapMode') === 'toggle') { if (keybinds.hit(g.input, 'map')) this.mapOpen = !this.mapOpen; } else this.mapOpen = keybinds.down(g.input, 'map');
+    const showMap = this.mapOpen && !g.uiBlocking();
     this.bigmap.style.display = showMap ? 'block' : 'none';
     if (showMap) this.drawMap(this.bigmap, false);
   }
@@ -537,10 +539,7 @@ export class HUD {
       } else if (s.spotUntil > now && s.state === 'alive') {
         const sp = proj(s.pos.x, s.pos.y + s.bodyH + 0.45, s.pos.z);
         if (!sp) continue;
-        // only when you could actually see them: no markers through walls, terrain or smoke
-        const hs = s.hitSpheres(), cp = cam.position, coll = g.world.collision;
-        const seen = (coll.los(cp.x, cp.y, cp.z, hs[0][0], hs[0][1], hs[0][2]) || coll.los(cp.x, cp.y, cp.z, hs[1][0], hs[1][1], hs[1][2])) && coll.softVisibility(cp.x, cp.y, cp.z, hs[1][0], hs[1][1], hs[1][2], now) > 0.1;
-        if (!seen) continue;
+        // spotted enemies stay marked through walls (spotting itself is range-limited)
         const r = 5 * dpr;
         c.fillStyle = ENEMY;
         c.beginPath(); c.moveTo(sp[0], sp[1] - r); c.lineTo(sp[0] + r, sp[1]); c.lineTo(sp[0], sp[1] + r); c.lineTo(sp[0] - r, sp[1]); c.closePath(); c.fill();

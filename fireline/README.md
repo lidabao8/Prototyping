@@ -39,11 +39,15 @@ cd fireline && npm install && npm run build
 **Aiming and visibility**
 - Aiming down sights is now more accurate: tighter spread, a precise first shot from a still stance, and a learnable recoil pattern. Hip fire is unchanged.
 - Hitboxes follow each soldier's animated skeleton, so what you see is what you hit.
+- Shots travel along the exact screen ray through your red dot, holo, iron sight or crosshair, including head bob, shake and sight sway.
+- Every bullet is visible as a streak (tracer rounds glow brighter); sniper and DMR rounds leave a vapour trail.
+- Spotting has limited range: 120m by eye, more through magnified sights, up to 400m through binoculars. Spotted enemies stay marked through walls.
 - Visible enemies get a thin red outline. Walls, terrain and props hide it exactly like they hide the soldier, and spot markers only appear when you have line of sight.
 - Every sight has a detailed model with glass: hollow iron aperture, red dot, holographic, 2x prism, and a full scope view with reticles for the 4x ACOG (chevron with range ticks) and 8x scope (mil-dot duplex).
 
 **Trackpad and accessibility**
-- Aim assist (off, low, medium, high): slows your aim over a visible enemy, gently pulls toward them, and snaps a little when you aim down sights. It never targets enemies behind cover.
+- Aim assist (off, low, medium, high): slows your aim over a visible enemy, tracks them as they move, gently pulls toward the visible part, and snaps a little when you aim down sights. It checks line of sight, smoke and foliage every frame and never acts on enemies you can't see.
+- Hold or toggle for crouch, aim, lean, sprint, scoreboard and map.
 - Look smoothing, arrow-key look, auto-sprint, and hold-to-fire for semi-automatic weapons.
 - A one-click **Trackpad mode** in Settings turns these on together with toggle aim, crouch and lean.
 
@@ -94,6 +98,8 @@ Bots fill input exactly as the player does: they move, aim and shoot through the
 - **Teamwork:** bots revive downed teammates (throwing smoke first if needed), heal each other, place ammo boxes, claymores, sandbags, rally points and beacons, and investigate sounds.
 - **Movement:** A* pathfinding on a 1m grid prefers routes near cover, with path smoothing. Bots keep their spacing, vault low obstacles, recover when stuck, sprint only when it is safe, and glance toward likely threats while moving.
 - **Commander:** each team has a commander that spreads squads across objectives, always keeps at least two squads attacking, and becomes more aggressive when losing.
+- **Weapon ranges:** bots only open fire within a realistic range for their weapon (SMGs about 70m, rifles 135–160m, LMGs 180m, DMRs and snipers much further, with magnified optics extending it). Out of range, attackers close the distance and defenders stay low. Aim wobble grows with distance unless the bot has a magnified scope.
+- **Reviving you:** bots go much further out of their way to revive the player, even mid-fight, and you bleed out more slowly while you wait.
 - **Difficulty:** Recruit, Regular, Veteran (default) and Elite. In headless duel tests against a stationary player at 30m, Elite bots downed the player in about 1 second, Veteran in about 2, Regular in about 3 and Recruit in about 5.
 
 ## Maps
