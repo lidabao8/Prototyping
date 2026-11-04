@@ -499,7 +499,7 @@ export class HUD {
     const game = this.game, p = game.player;
     if (p.grab) {
       const c = p.pushCharge;
-      this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : `HOLD ${game.keyLabel('up')}: PUSH OFF TOWARDS AIM   ${game.keyLabel('grab')}: RELEASE`, cx, cy + 120, 13, OK, 'center', 700);
+      this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : `HOLD ${game.keyLabel('pushOff')}: PUSH OFF TOWARDS AIM   ${game.keyLabel('grab')}: RELEASE`, cx, cy + 120, 13, OK, 'center', 700);
       if (p.grab.kind !== 'pod' && !c) this.text('MOVE KEYS: CRAWL ALONG THE SURFACE (NO GAS)', cx, cy + 138, 11, OK, 'center');
       if (p.grab.kind === 'pod' && !c) this.text(`MOVE KEYS: HAUL POD (${(p.mass + p.grab.obj.mass).toFixed(0)} kg combined)`, cx, cy + 138, 11, OK, 'center');
       if (c > 0) this.bar(cx - 80, cy + 132, 160, 4, c, OK);

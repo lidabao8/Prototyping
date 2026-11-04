@@ -16,7 +16,7 @@ const STEP = 1 / 120;
 const CALLSIGNS = ['VEGA', 'KESTREL', 'NOMAD', 'APEX', 'ORBIT', 'HALO', 'RAZOR', 'TALON', 'DRIFT', 'NOVA', 'SPECTER', 'CINDER', 'ECHO', 'PULSAR', 'QUASAR', 'ZENITH'];
 export const ACTIONS = [
   ['forward', 'Move forward', 'KeyW'], ['back', 'Move back', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
-  ['up', 'Move up / push off', 'Space'], ['down', 'Move down', 'ShiftLeft'], ['rollLeft', 'Roll left', 'KeyQ'], ['rollRight', 'Roll right', 'KeyE'],
+  ['up', 'Move up', 'Space'], ['down', 'Move down', 'ShiftLeft'], ['pushOff', 'Push off (hold, while holding on)', 'KeyZ'], ['rollLeft', 'Roll left', 'KeyQ'], ['rollRight', 'Roll right', 'KeyE'],
   ['brake', 'Match velocity (brake)', 'KeyC'], ['killRot', 'Kill rotation', 'KeyX'], ['grab', 'Grab / release', 'KeyF'],
   ['reload', 'Reload', 'KeyR'], ['grenade', 'Grenade', 'KeyG'], ['melee', 'Momentum hammer', 'KeyV'],
   ['weapon1', 'Primary weapon', 'Digit1'], ['weapon2', 'Secondary weapon', 'Digit2'],
@@ -118,6 +118,7 @@ class Game {
     try { saved = JSON.parse(localStorage.getItem('deltav.settings') || '{}') || {}; } catch (e) { saved = {}; }
     const st = { ...DEFAULTS, ...saved };
     st.binds = { ...DEFAULT_BINDS, ...(saved.binds || {}) };
+    if (!(saved.binds && saved.binds.pushOff) && Object.entries(st.binds).some(([k, v]) => k !== 'pushOff' && v === st.binds.pushOff)) st.binds.pushOff = '';
     st.rules = { ...DEFAULT_RULES, ...(saved.rules || {}) };
     if (!MAPS[st.map]) st.map = 'hangar';
     st.gfx = { ...DEFAULTS.gfx, ...(saved.gfx || {}) };
@@ -627,7 +628,7 @@ class Game {
     // mouse turns the body directly
     p.addAim(-inp.mouse.dx * sens, (this.settings.invertY ? 1 : -1) * inp.mouse.dy * sens);
     const k = (a) => (this.bound(a) ? 1 : 0);
-    c.move.set(k('right') - k('left'), (p.grab ? 0 : k('up')) - k('down'), k('back') - k('forward'));
+    c.move.set(k('right') - k('left'), k('up') - k('down'), k('back') - k('forward'));
     c.roll = k('rollLeft') - k('rollRight');
     c.killRot = this.bound('killRot');
     c.brake = this.bound('brake');
@@ -647,7 +648,7 @@ class Game {
     // grab / push-off
     if (this.pressedAct('grab')) { if (p.grab) this.releaseGrab(p); else this.tryGrab(p); }
     if (p.grab) {
-      if (this.bound('up')) p.pushCharge = Math.min(1, p.pushCharge + dt / 0.6);
+      if (this.bound('pushOff')) p.pushCharge = Math.min(1, p.pushCharge + dt / 0.6);
       else if (p.pushCharge > 0) { this.pushOff(p, p.aimDir(new THREE.Vector3()), 2 + 5 * p.pushCharge); p.pushCharge = 0; }
     } else p.pushCharge = 0;
     // weapons

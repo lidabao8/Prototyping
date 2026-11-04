@@ -105,7 +105,8 @@ Every key can be rebound in the menu under **Controls & keybinds**. Rebinding a 
 | --- | --- |
 | Mouse | Turn your body |
 | W/S, A/D | Translate forward/back, left/right (body frame) |
-| Space / Left Shift | Translate up / down. While anchored, Space charges a push-off. |
+| Space / Left Shift | Translate up / down (crawls along a held surface, like the other move keys) |
+| Z | Hold to charge a push-off while holding on; release to launch towards your aim (up to 7 m/s) |
 | Q / E | Roll |
 | C | Match velocity (brake) |
 | X | Kill rotation |
