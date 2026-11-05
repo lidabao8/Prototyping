@@ -266,6 +266,44 @@ export class World {
         floorBox(dir, ...X(50, 51.2), 0, 10, 2.2, M.steel);
       }
     }
+    // more street cover: barricades and crate stacks between the existing pieces
+    for (let dir = 0; dir < 4; dir++) {
+      for (const sx of [-1, 1]) {
+        const X = (a, b) => (sx > 0 ? [a, b] : [-b, -a]);
+        floorBox(dir, ...X(4, 5.2), (dir % 2 ? -5 : 5), 4, 1.8, M.steel);
+        floorBox(dir, ...X(14, 16.5), (dir % 2 ? 6 : -6), 2.5, 3.5, C[(dir + 2) % 4]);
+        floorBox(dir, ...X(24, 25.2), 0, 5, 1.6, M.steel);
+        floorBox(dir, ...X(26, 28.5), (dir % 2 ? -7 : 7), 2.5, 2.5, C[(dir + 3) % 4]);
+        floorBox(dir, ...X(34, 36.5), 3, 2.5, 2.5, C[dir]);
+        floorBox(dir, ...X(34, 36.5), -3, 2.5, 5, C[(dir + 1) % 4]);
+      }
+    }
+    // crates half-buried in the curved floor between the streets (45 deg sectors)
+    const C2 = [M.cGrey, M.cRed, M.cTeal, M.cYel];
+    for (let k = 0; k < 4; k++) {
+      const a = Math.PI / 4 + k * Math.PI / 2;
+      const cy = Math.cos(a) * (R - 1.3), cz = Math.sin(a) * (R - 1.3);
+      for (const x of [-46, -32, -16, -6, 6, 16, 32, 46]) {
+        const h = 1.4 + ((k + Math.abs(x)) % 3) * 0.4;
+        this.addBox([x - 1.4, cy - h, cz - h], [x + 1.4, cy + h, cz + h], C2[(k + (x > 0 ? 1 : 0)) % 4], { tile: 3 });
+      }
+    }
+    // plates that break the long axial sightlines (offset from the axis truss)
+    this.addMirrored([40, -7, 2], [40.5, 1, 10], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([40, -1, -10], [40.5, 7, -2], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([50, 4, 4], [50.5, 12, 12], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([50, -12, -12], [50.5, -4, -4], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([17, 3, -5], [19.6, 5.6, -2.4], M.cYel, M.cTeal, { tile: 3 });
+    this.addMirrored([17, -5.6, 2.4], [19.6, -3, 5], M.cRed, M.cGrey, { tile: 3 });
+    // mid-air cover between the core and the floor (r ~ 16-24): floating crates and plates
+    for (const sx of [-1, 1]) {
+      for (let k = 0; k < 6; k++) {
+        const a = k / 6 * Math.PI * 2 + (sx > 0 ? 0.3 : 0.8), rr = 17 + (k % 3) * 3;
+        const y = Math.cos(a) * rr, z = Math.sin(a) * rr, x = sx * (10 + (k % 3) * 11);
+        if (k % 2) this.addBox([x - 1.3, y - 1.3, z - 1.3], [x + 1.3, y + 1.3, z + 1.3], C2[k % 4], { tile: 3 });
+        else this.addBox([x - 0.25, y - 3, z - 3], [x + 0.25, y + 3, z + 3], M.steel, { tile: 3 });
+      }
+    }
     // ---- zero-g core: hub, spokes, floating platforms ----
     this.addBox([-5, -4, -4], [5, 4, 4], M.hull, { tile: 4 });
     this.addBox([-1, -1, -1], [1, 1, 1], null);
@@ -499,6 +537,21 @@ export class World {
     this.addMirrored([12, -16, 22], [18, -10, 22.5], M.steel, M.steel, { tile: 3 });
     this.addMirrored([44, 18, -6], [44.5, 26, 6], M.steel, M.steel, { tile: 3 });
     this.addMirrored([36, -30, -28], [44, -29.5, -20], M.steel, M.steel, { tile: 3 });
+    // ---- Sightline breakers (long spawn-to-spawn lanes) ----
+    this.addMirrored([44, 8, 10], [44.6, 18, 22], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([44, -20, -4], [44.6, -10, 6], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([36, -4, -32], [38.6, 8, -29.4], M.cRed, M.cTeal, { tile: 3 });
+    this.addMirrored([30, 24, -24], [42, 26.6, -21.4], M.cGrey, M.cGrey, { tile: 3 });
+    this.addMirrored([8, -12, -28], [8.6, -4, -18], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([8, 14, 6], [8.6, 24, 16], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([8, -28, 6], [8.6, -18, 14], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([16, 26, 2], [19, 29, 5], M.cYel, M.cYel, { tile: 3 });
+    this.addMirrored([17, -8, 9], [20, -5, 12], M.cRed, M.cTeal, { tile: 3 });
+    this.addMirrored([26, 4, -14], [29, 7, -11], M.cGrey, M.cGrey, { tile: 3 });
+    this.addMirrored([48, -26, -26], [50.6, -23.4, -23.4], M.cTeal, M.cRed, { tile: 3 });
+    this.addMirrored([48, 22, 24], [50.6, 24.6, 26.6], M.cRed, M.cTeal, { tile: 3 });
+    this.addMirrored([30, -30, 24], [36, -29.5, 32], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([20, 0, 26], [20.6, 10, 34], M.steel, M.steel, { tile: 3 });
     // ---- Girders spanning the hall ----
     this.addMirrored([17.4, -28.6, -HZ], [18.6, -27.4, HZ], M.girder, M.girder, { tile: 2 });
     this.addMirrored([37.4, 25.4, -HZ], [38.6, 26.6, HZ], M.girder, M.girder, { tile: 2 });
@@ -1122,6 +1175,14 @@ export class World {
       [[26, -8, 30], [34, 0, 30.6]], [[70, 8, -22], [70.6, 18, -12]], [[44, -30, 8], [52, -29.5, 18]], [[108, 0, 40], [108.6, 10, 50]],
     ];
     plates.forEach(([a, b]) => this.addMirrored(a, b, M.steel, M.steel, { tile: 3 }));
+    // extra sightline breakers across the open field
+    const extra = [
+      [[24, 10, -20], [24.6, 22, -8]], [[24, -22, 10], [24.6, -10, 22]], [[50, -10, -46], [50.6, 2, -34]], [[52, 30, 6], [52.6, 42, 18]],
+      [[78, -6, -14], [78.6, 6, -2]], [[80, 20, 40], [80.6, 32, 52]], [[96, -30, 10], [96.6, -18, 22]], [[40, -48, -6], [52, -47.4, 6]],
+    ];
+    extra.forEach(([a, b]) => this.addMirrored(a, b, M.steel, M.steel, { tile: 3 }));
+    const boxes2 = [[[36, 2, 38], [38.6, 4.6, 50]], [[66, 28, -28], [68.6, 40, -25.4]], [[88, -18, -50], [100, -15.4, -47.4]], [[14, -12, -50], [16.6, 0, -47.4]]];
+    boxes2.forEach(([a, b], i) => this.addMirrored(a, b, C[(i + 2) % 4], C[(i + 3) % 4], { tile: 3 }));
     // asteroids (collision spheres)
     const rocks = [[45, 35, 30, 9], [75, -40, -20, 12], [30, -30, 45, 7], [100, 40, -45, 10], [60, 20, -52, 6], [112, -38, 42, 8], [20, 46, -28, 5], [86, 0, 54, 7], [130, 50, 0, 9]];
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x6b625a, roughness: 0.95, metalness: 0.05, flatShading: true });

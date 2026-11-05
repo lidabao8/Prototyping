@@ -29,7 +29,7 @@ export const ACTIONS = [
   ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
-const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false };
+const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false, thrust: 1 };
 const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
@@ -240,7 +240,12 @@ class Game {
     $('mapDesc').textContent = MAPS[st.map].desc;
     $('optMap').addEventListener('change', () => { $('mapDesc').textContent = MAPS[st.map].desc; });
     const chk = (id, get, set) => { const el = $(id); if (!el) return; el.checked = get(); el.addEventListener('change', () => { set(el.checked); this.saveSettings(); }); };
-    for (const k of Object.keys(DEFAULT_RULES)) chk('rule_' + k, () => st.rules[k], (v) => { st.rules[k] = v; });
+    for (const k of Object.keys(DEFAULT_RULES)) if (typeof DEFAULT_RULES[k] === 'boolean') chk('rule_' + k, () => st.rules[k], (v) => { st.rules[k] = v; });
+    const th = $('optThrust');
+    if (th) {
+      th.value = String(st.rules.thrust || 1);
+      th.addEventListener('change', () => { st.rules.thrust = Number(th.value) || 1; this.saveSettings(); if (this.refreshSummary) this.refreshSummary(); });
+    }
     chk('optOutline', () => st.outlines, (v) => { st.outlines = v; });
     this.buildBindUI();
     this.setupLoadoutUI();
@@ -336,7 +341,7 @@ class Game {
     const st = this.settings;
     const summary = () => {
       const el = $('matchSummary'); if (!el) return;
-      el.innerHTML = `<span>MAP <b>${MAPS[st.map].name.toUpperCase()}</b></span><span>BOTS <b>${st.difficulty.toUpperCase()}</b></span><span><b>${st.teamSize}V${st.teamSize}</b></span><span>FIRST TO <b>${st.scoreLimit}</b></span><span>LOADOUT <b>${st.loadout.map((w) => WEAPONS[w].short).join(' + ')}</b></span>`;
+      el.innerHTML = `<span>MAP <b>${MAPS[st.map].name.toUpperCase()}</b></span><span>BOTS <b>${st.difficulty.toUpperCase()}</b></span><span>THRUST <b>${Math.round((st.rules.thrust || 1) * 100)}%</b></span><span><b>${st.teamSize}V${st.teamSize}</b></span><span>FIRST TO <b>${st.scoreLimit}</b></span><span>LOADOUT <b>${st.loadout.map((w) => WEAPONS[w].short).join(' + ')}</b></span>`;
     };
     for (const id of ['optMap', 'optDiff', 'optTeam', 'optScore', 'optPri', 'optSec']) { const el = $(id); if (el) el.addEventListener('change', summary); }
     this.refreshSummary = summary;
@@ -771,7 +776,7 @@ class Game {
     this.hud.hit(m.h, m.k);
     const t = this.netSoldiers.get(m.id);
     if (this.settings.dmgNumbers && t) this.hud.damageNumber(t, new THREE.Vector3().fromArray(m.p), m.a, m.h, m.k);
-    this.audio.play(m.k ? 'kill' : m.h ? 'head' : 'hit');
+    this.audio.play(m.k ? (m.h ? 'killhead' : 'kill') : m.h ? 'head' : 'hit');
   }
 
   // ---------------- Events from simulation ----------------
@@ -844,7 +849,7 @@ class Game {
     if (attacker === this.player && s !== this.player && amount > 0.3) {
       this.hud.hit(part === 'head', killed);
       if (this.settings.dmgNumbers) this.hud.damageNumber(s, point || s.pos, amount, part === 'head', killed);
-      this.audio.play(killed ? 'kill' : part === 'head' ? 'head' : 'hit');
+      this.audio.play(killed ? (part === 'head' ? 'killhead' : 'kill') : part === 'head' ? 'head' : 'hit');
     }
     if (s === this.player && amount > 0.5 && cause !== 'hypoxia') {
       this.hud.damageFrom(attacker ? attacker.pos : point);

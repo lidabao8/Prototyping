@@ -47,6 +47,39 @@ export class Audio {
     }
   }
 
+  /** Tone with a fast attack and exponential decay, optional pitch glide. */
+  tone(freq, dur, gain, type = 'sine', delay = 0, glideTo = null) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + delay;
+    const o = this.ctx.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  /** Hitmarker: crisp tick (filtered noise click + short high sine). Rate-limited for beams. */
+  hitTick(head) {
+    const now = performance.now();
+    if (now - (this._lastHit || 0) < (head ? 40 : 70)) return;
+    this._lastHit = now;
+    const j = 1 + (Math.random() - 0.5) * 0.08;
+    this.burst({ freq: 5200 * j, q: 2.5, type: 'bandpass', dur: 0.035, gain: 0.32 });
+    this.tone(2900 * j, 0.06, 0.12, 'triangle');
+    if (head) { this.tone(2650, 0.28, 0.13, 'sine', 0.01); this.tone(3980, 0.22, 0.08, 'sine', 0.01); this.tone(5300, 0.12, 0.04, 'sine', 0.012); }
+  }
+
+  /** Kill confirm: low punch, rising three-note chime, airy swish; headshot kills ring brighter. */
+  killConfirm(head) {
+    this.tone(150, 0.22, 0.45, 'sine', 0, 55);
+    this.burst({ freq: 320, dur: 0.12, gain: 0.35, type: 'lowpass' });
+    const base = head ? 1046.5 : 880;
+    [1, 1.25, 1.5].forEach((m, i) => { this.tone(base * m, 0.45 - i * 0.05, 0.12, 'triangle', 0.045 * i); this.tone(base * m * 2, 0.3, 0.035, 'sine', 0.045 * i); });
+    this.burst({ freq: 6000, q: 0.8, type: 'highpass', dur: 0.25, gain: 0.07 });
+    if (head) this.tone(3136, 0.5, 0.06, 'sine', 0.14);
+  }
+
   beep(freq, dur = 0.08, gain = 0.15, type = 'square') {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
@@ -63,9 +96,10 @@ export class Audio {
       case 'recoilless': this.burst({ freq: 700, dur: 0.6, gain: 0.7, tone: 70, toneDur: 0.35, dist }); break;
       case 'maser': this.beep(2600 + Math.random() * 200, 0.05, dist > 3 ? 0.02 / (1 + dist * 0.05) : 0.05, 'sawtooth'); break;
       case 'explosion': this.burst({ freq: 400, dur: 1.0, gain: 0.9, tone: 60, toneDur: 0.6, dist }); break;
-      case 'hit': this.beep(1400, 0.05, 0.12, 'triangle'); break;
-      case 'head': this.beep(2100, 0.07, 0.15, 'triangle'); break;
-      case 'kill': this.beep(880, 0.08, 0.15); setTimeout(() => this.beep(1320, 0.12, 0.15), 80); break;
+      case 'hit': this.hitTick(false); break;
+      case 'head': this.hitTick(true); break;
+      case 'kill': this.killConfirm(false); break;
+      case 'killhead': this.killConfirm(true); break;
       case 'hurt': this.burst({ freq: 300, dur: 0.25, gain: 0.5, tone: 70, toneDur: 0.2 }); break;
       case 'impact': this.burst({ freq: 200, dur: 0.3, gain: 0.5, tone: 50, toneDur: 0.25, dist }); break;
       case 'clank': this.burst({ freq: 1200, q: 6, type: 'bandpass', dur: 0.15, gain: 0.3, dist }); break;

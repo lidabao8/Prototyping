@@ -14,13 +14,15 @@ export const MODE_DESC = [
 ];
 
 export const NOZZLE_F = 110;     // N per nozzle (nominal)
-// Each thruster quad is fed from a small plenum: a fresh burst runs hot (1.5x), sustained firing tapers to 0.65x.
-// Pressure drains with flow and refills slowly, so pulsing the key can't beat holding it.
-export const PLENUM = { max: 1.5, min: 0.65, drain: 0.9, refill: 0.5 };
+// Each thruster quad is fed from a small plenum: a fresh burst runs at 2x, sustained firing tapers to 1x.
+// Drain and refill run at the same rate (k = drain/refill = 1): that's the tightest setting where
+// pulsing at any duty cycle d averages d*(2 - d) <= 1, i.e. never more than simply holding the key.
+export const PLENUM = { max: 2.0, min: 1.0, drain: 2.0, refill: 2.0 };
 export const VE = 700;           // m/s cold-gas exhaust velocity
 export const GAS_MAX = 10;       // kg of N2
 export const BASE_MASS = 112;    // kg (person + suit, without weapons or gas)
 export const BODY_R = 0.7;       // collision radius
+export const MAX_HP = 125;       // suit integrity points
 export const ROLL_RATE = 1.5;
 const RATE_K = 3.2;
 const TA = 0.42, TB = 0.5;       // thruster tower lateral/vertical offset (m)
@@ -159,7 +161,7 @@ export class Soldier {
   }
 
   reset() {
-    this.health = 100;
+    this.health = MAX_HP;
     this.o2 = 100;
     this.gas = GAS_MAX;
     this.vel.set(0, 0, 0);
@@ -370,7 +372,7 @@ export class Soldier {
     let need = 0;
     for (let i = 0; i < 4; i++) {
       const st = this.towers[i];
-      fac[i] = PLENUM.min + (PLENUM.max - PLENUM.min) * st.press;
+      fac[i] = (PLENUM.min + (PLENUM.max - PLENUM.min) * st.press) * (this.game.rules.thrust || 1);
       let ti = 0; for (let k = 0; k < 6; k++) ti += th[i * 6 + k];
       need += ti * NOZZLE_F * fac[i] / VE * dt;
     }
@@ -488,7 +490,7 @@ export class Soldier {
     const gmag = world.gravityAt(this.pos, _g1).length();
     if (gmag < 0.8) return;
     const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.3, true);
-    if (!h || h.n.dot(up) < 0.7) return;
+    if (!h || h.n.dot(up) < 0.5) return;
     const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
     if (bodyUp.dot(up) < 0.35) return; // landed on your back or head: tumble instead
     // legs absorb more than a body slam
@@ -520,7 +522,7 @@ export class Soldier {
     const up = world.upAt(this.pos, _w1);
     const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.6, true);
     const g = world.gravityAt(this.pos, _g1);
-    if (!h || h.n.dot(up) < 0.6 || g.length() < 0.5) { this.leaveWalk(); return; }
+    if (!h || h.n.dot(up) < 0.45 || g.length() < 0.5) { this.leaveWalk(); return; }
     // stay upright: body up follows local up (keeps yaw)
     const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
     this.quat.premultiply(_q.setFromUnitVectors(bodyUp, up)).normalize();
@@ -540,6 +542,17 @@ export class Soldier {
     const vt = _v.copy(this.vel).addScaledVector(up, -this.vel.dot(up));
     vt.lerp(tgt, Math.min(1, dt * 10));
     let vn = this.vel.dot(up);
+    // unstick: pushing a direction but not getting anywhere for a second -> small hop
+    const wants = this.walkTarget ? this.walkTarget.lengthSq() > 1 : (this.ctrl.move.x !== 0 || this.ctrl.move.z !== 0);
+    if (wants) {
+      this.stuckAcc = (this.stuckAcc || 0) + dt;
+      if (!this.stuckRef) this.stuckRef = this.pos.clone();
+      if (this.stuckAcc > 1) {
+        const hop = this.pos.distanceTo(this.stuckRef) < 0.25;
+        this.stuckAcc = 0; this.stuckRef.copy(this.pos);
+        if (hop) { this.vel.addScaledVector(up, 2.6); this.pos.addScaledVector(up, 0.05); this.leaveWalk(); return; }
+      }
+    } else { this.stuckAcc = 0; this.stuckRef = null; }
     // jump
     const jump = this.walkTarget ? this.walkJump : this.ctrl.move.y > 0.5;
     if (jump && this.jumpGrace <= 0) { vn = 4.5; this.walkJump = false; this.jumped = true; }
@@ -549,8 +562,8 @@ export class Soldier {
     const hgt = 1.05;
     this.pos.addScaledVector(vt, dt).addScaledVector(h.n, (hgt - h.t) * Math.min(1, dt * 20));
     this.vel.addScaledVector(up, -this.vel.dot(up));
-    world.sphereContacts(this.pos, BODY_R, (n, depth) => {
-      if (n.dot(up) > 0.7) return; // the floor is handled by the stance spring
+    world.sphereContacts(this.pos, BODY_R, (n, depth, kind) => {
+      if (kind === 'wall' && n.dot(up) > 0.7) return; // the drum floor itself is handled by the stance spring
       this.pos.addScaledVector(n, depth);
       const vn2 = this.vel.dot(n);
       if (vn2 < 0) this.vel.addScaledVector(n, -vn2);
@@ -672,7 +685,7 @@ export class Soldier {
     else this.o2 = Math.min(100, this.o2 + 4 * dt);
     if (this.o2 <= 0) this.game.damage(this, 12 * dt, null, 'hypoxia');
     // health regen
-    if (t - this.lastDamageT > 5 && this.health < 100) this.health = Math.min(100, this.health + 14 * dt);
+    if (t - this.lastDamageT > 5 && this.health < MAX_HP) this.health = Math.min(MAX_HP, this.health + 16 * dt);
     // aim kick recovery
     this.kick.multiplyScalar(Math.exp(-dt * 10));
   }

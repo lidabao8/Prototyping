@@ -12,6 +12,7 @@ The station is a 72 m-diameter, 140 m-long drum spinning about its long axis at 
 
 * **Gravity:** centrifugal acceleration Ω²r points outward from the axis. It's about 0.2 g on the rim and fades to zero at the centre. The RCS can climb against it.
 * **Floating:** RCS works as everywhere else, but you also feel the centrifugal pull and Coriolis drift (−2Ω×v). A slow fall curves sideways, and grenades arc. Bullets fly straight, as a gameplay simplification.
+* **Unsticking:** walking resolves every obstacle except the drum floor itself, so you can't wedge into crate edges. If you push a direction but don't move for a second, a small hop frees you.
 * **Landing:** touch the floor feet-down and you switch to normal walking: WASD, mouse look with head pitch, and the RCS shuts off. Jump (Space) to push off the floor straight into flight mode, with the RCS back online; you only land again when coming down onto the floor. Legs absorb landings up to 11 m/s, and a fall from the axis arrives at about 8.5 m/s. Landing on your back or head just bounces you.
 * **Layout:** cover stands on the floor in four streets around the drum (low walls, crates, two-storey blocks). The zero-g core has a central hub, spokes, an axial truss, floating low-gravity platforms and crates.
 * **Bots:** they walk the floor (jumping when their path climbs) and fly the core, cancelling the spin forces with their jets as far as thrust allows. There is no "up", and nothing gives you momentum for free: every burn, shot, push-off and suit leak changes your trajectory.
@@ -57,7 +58,8 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **The suit has 24 RCS nozzles**: four thruster quads with six nozzles each, at the corners of the backpack. Every nozzle applies its force at its own position. Net force and torque are summed as $\vec a = \tfrac{1}{m}\sum \vec F_i$ and $\vec\tau = \sum \vec r_i \times \vec F_i$.
 * **Rotation uses Euler's equations** with a non-symmetric inertia tensor: $\dot{\vec\omega} = I^{-1}(\vec\tau - \vec\omega \times I\vec\omega)$. Tumbling about the intermediate axis is possible.
 * **Nozzles are on/off.** Player keys fire them at full thrust. The flight computer's assists drive them with pulse-width modulation.
-* **Each quad has its own pressure reserve.** A fresh burst runs at 1.5× nominal thrust and tapers to 0.65× after about 1.5 s of sustained firing. Pressure drains with flow and refills more slowly, so pulsing a key averages less thrust than holding it. Each quad's pressure shows beside it in the suit schematic.
+* **Each quad has its own pressure reserve.** A fresh burst runs at 2× nominal thrust and tapers to 1× while held: it's down to about 1.15× after 1 s, and recovers about 70% within half a second of letting go. Drain and refill run at the same rate, which is the tightest setting where pulsing at any duty cycle *d* averages *d*(2 − *d*) ≤ 1, so spamming a key can at best match holding it. Each quad's pressure shows beside it in the suit schematic.
+* **EVA thruster strength** is a match setting (Play tab, 50–300%). It scales every suit's jets, bots included. In multiplayer the host's value applies.
 * **Fuel is cold-gas N₂** (10 kg, $v_e$ = 700 m/s). The HUD shows Δv in m/s from the rocket equation, $\Delta v = v_e\ln\frac{m_0}{m_f}$. The gas starts refilling 0.6 s after the jets go quiet: about 1.1 kg/s in free flight, 2.2 kg/s while anchored. Infinite gas is a menu option.
 * **Damage matters.** Hits near a thruster quad can destroy it. After that, translating also produces torque, and the assist burns extra gas fighting the spin. Suit breaches vent gas, which pushes and spins you, and drains O₂.
 * **Mass matters.** Weapons and gas count towards your mass. Holding a cargo pod and thrusting pushes the combined 300+ kg.
@@ -79,7 +81,11 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
   * **FL-12 flechette:** heavy recoil (about 0.75 m/s per shot). It doubles as an escape burn.
   * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius (30 reserve rockets) and a small splash.
-  * **RR-90 recoilless:** a single 88-damage HE slug with a 4 m blast and no recoil. The slug homes slightly: it locks the enemy nearest the crosshair within about 7° (shown as TRACK) and steers at up to 90 m/s² sideways. The backblast shoves (and hurts enemies) up to 7 m behind you. Fully aimed, it switches to a full-screen scope.
+  * **RR-90 recoilless:** a single 55-damage HE slug (30 rpm, 10 spare) with no recoil and no guidance.
+    * Its proximity fuse arms 8 m out and bursts at the closest approach within 2.5 m of an enemy.
+    * The 4.5 m blast falls off with distance squared: a 2 m near-miss does about 12.
+    * The backblast shoves (and hurts enemies) up to 7 m behind you.
+    * Fully aimed, it switches to a full-screen scope.
   * **LM-2 maser:** a steady continuous beam (gunmetal body, yellow accents), 80 damage per second while held. No recoil, no ammo; it overheats after about 2 s of fire and vents.
 * **Grenades:** thrown at 18 m/s on a 3.5 s fuse. They fly straight, bounce elastically off walls, and leave the hand partway through a throw animation.
 * **Momentum hammer (V):** sends the target tumbling.
@@ -87,6 +93,13 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **Tracers:** every round leaves the actual barrel (your viewmodel's muzzle, or a bot's gun) and converges on the crosshair point, drawn as a glowing streak.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
 * **Wall and pod impacts:** hitting a wall above 8 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
+
+### Balance
+
+* Suits have 125 integrity, and regenerate 16/s after 5 s without damage.
+* All maps have extra cover to break up the long spawn-to-spawn sightlines. The Spin Drum also has half-buried crates on the curved floor between its streets, and floating crates and plates between the core and the floor.
+* Bots' aim error grows with range (about 2× at 45 m, 3× at 90 m), so long-range trades are survivable and close fights stay deadly.
+* In 150 s Hard bot matches, the average life rose from 19 s to 28 s on Hangar, 18 s to 32 s on the Spin Drum, and 42 s to 53 s on the Derelict Yard.
 
 ### Spawn shields and ammo depots
 
@@ -177,6 +190,10 @@ The HUD shows:
 * Rotation-rate arcs around the reticle for yaw, pitch and roll.
 * Range, relative velocity and closing speed to whatever is under the crosshair.
 * Hitmarkers that pop and fade: white for body hits, yellow for headshots, red with a ring for kills. Optional floating damage numbers stack rapid hits.
+* Hit sounds are synthesized:
+  * Hit: a crisp tick, rate-limited for beams.
+  * Headshot: the tick plus a metallic "dink".
+  * Kill: a low punch, a rising three-note chime and an airy swish. Headshot kills get a brighter chime and an extra ring.
 * A `COLLISION x.x s` time-to-impact warning.
 * Δv, N₂, HP and O₂ readouts, and a suit diagram showing quad health, nozzle activity and leaks.
 * An optional reference grid (H). It also fades in automatically when you tumble.

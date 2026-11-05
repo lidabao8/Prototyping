@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, interceptTime, interceptTimeRocket, raySphere } from './math.js';
-import { GAS_MAX, MODES, TEAM_COLORS, TEAM_NAMES, TOWERS, BODY_R, HIT_THRESH } from './soldier.js';
+import { GAS_MAX, MODES, TEAM_COLORS, TEAM_NAMES, TOWERS, BODY_R, HIT_THRESH, MAX_HP } from './soldier.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
 const css = (hex) => '#' + hex.toString(16).padStart(6, '0');
@@ -367,7 +367,7 @@ export class HUD {
     const info = this.aimInfo, ud = this.game.vmGuns[p.weapon.def.id].userData;
     this.spaced(`${(ud.zoom || 1).toFixed(1)}×`, x0 + 28, y0 + S - 26, 13, '#9fe8ff', 'left', 700, 2, this.disp);
     if (info && info.dist < 399) this.spaced(`${info.dist.toFixed(0)} m`, x0 + S - 28, y0 + S - 26, 13, '#9fe8ff', 'right', 700, 2, this.disp);
-    if (p.weapon.def.homing) this.spaced('GUIDED HE', cx, y0 + S - 26, 11, WARN, 'center', 700, 3);
+    if (p.weapon.def.proximity) this.spaced('PROXIMITY HE', cx, y0 + S - 26, 11, WARN, 'center', 700, 3);
   }
 
   drawBounds(cx, cy) {
@@ -519,7 +519,7 @@ export class HUD {
     this.num(String(Math.ceil(p.health)), hx, y + 30, 28, hc);
     this.spaced('HEALTH', hx + 62, y + 24, 9, '#8996a1', 'left', 700, 3);
     for (let i = 0; i < 10; i++) {
-      const on = p.health > i * 10 + 0.5;
+      const on = p.health / MAX_HP * 100 > i * 10 + 0.5;
       g.fillStyle = on ? (p.health < 35 ? DANGER : OK) : 'rgba(255,255,255,0.08)';
       g.fillRect(hx + i * 15, y + 48, 12, 6);
     }

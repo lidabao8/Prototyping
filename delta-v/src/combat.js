@@ -167,6 +167,26 @@ export class Combat {
     this.grenades.push({ pos, vel, owner: s || g.player, fuse: GRENADE.fuse, mesh: this.spawnGrenadeMesh(s ? s.team : 0, pos), spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)), visual: true });
   }
 
+  /** Proximity fuse: once armed, burst at the closest approach to any enemy inside the fuse radius. */
+  proximityFuse(p, dt) {
+    const fz = p.def.proximity;
+    if (p.pos.distanceTo(p.start) < fz.arm) return false;
+    const seg = _v.copy(p.vel).multiplyScalar(dt);
+    const len2 = seg.lengthSq();
+    for (const s of this.game.soldiers) {
+      if (!s.alive || s.team === p.owner.team) continue;
+      const rel = _v2.subVectors(s.pos, p.pos);
+      const t = len2 > 0 ? Math.max(0, Math.min(1, rel.dot(seg) / len2)) : 0;
+      if (t >= 1) continue; // still closing in: wait for the true closest approach (or an impact)
+      const closest = _v3.copy(p.pos).addScaledVector(seg, t);
+      if (closest.distanceTo(s.pos) < fz.radius) {
+        this.explode(closest.clone(), p.owner, p.def.splash, p.def.splashDmg, p.def.splashImpulse || 140, p.def.id, null, p.def.splashFalloff || 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Enemy closest to the line of fire inside the guidance cone, with line of sight. */
   homingTarget(s, eye, aim, cone) {
     let best = null, bestA = cone;
@@ -387,6 +407,8 @@ export class Combat {
         this.removeProj(i);
         continue;
       }
+      // no impact this step: the proximity fuse bursts at the closest approach to an enemy
+      if (p.def.proximity && !p.visual && this.proximityFuse(p, dt)) { this.removeProj(i); continue; }
       p.pos.addScaledVector(p.vel, dt);
       if (p.age > 3.5) this.removeProj(i);
     }
@@ -465,10 +487,10 @@ export class Combat {
         g.damage(s, dmg, p.owner, def.id, hp, part.part);
       }
       g.fx.suitHit(hp, dir.clone().negate(), s.vel);
-      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id, s);
+      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id, s, def.splashFalloff || 1);
     } else {
       if (kind === 'pod') obj.vel.addScaledVector(dir, (def.kind === 'rocket' ? 60 : momentum) / obj.mass);
-      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id);
+      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id, null, def.splashFalloff || 1);
       else {
         g.fx.impact(hp, n || dir.clone().negate());
         const d = g.distToListener(hp);
@@ -477,7 +499,7 @@ export class Combat {
     }
   }
 
-  explode(pos, owner, radius, dmg, impulse, cause, skip = null) {
+  explode(pos, owner, radius, dmg, impulse, cause, skip = null, falloff = 1) {
     const g = this.game;
     g.fx.explosion(pos, radius * 0.35);
     g.audio.play('explosion', g.distToListener(pos));
@@ -497,7 +519,7 @@ export class Combat {
       s.applyImpulse(dir.clone().multiplyScalar(impulse * f), hitPt);
       if (!s.alive || s === skip || s.spawnProtect > 0) continue;
       if (s.team === owner.team && s !== owner) continue;
-      g.damage(s, dmg * f * (s === owner ? 0.6 : 1), owner, cause, hitPt, 'body');
+      g.damage(s, dmg * Math.pow(f, falloff) * (s === owner ? 0.6 : 1), owner, cause, hitPt, 'body');
       if (Math.random() < f) g.damageTower(s, Math.floor(Math.random() * 4), 25 * f);
       if (g.rules.breaches && Math.random() < 0.5 * f && s.leaks.length < 3) {
         s.leaks.push({ p: new THREE.Vector3(rand(-0.2, 0.2), rand(-0.1, 0.4), rand(-0.15, 0.3)), n: new THREE.Vector3().randomDirection(), t: 5 });

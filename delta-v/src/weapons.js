@@ -16,12 +16,13 @@ export const WEAPONS = {
     spread: 0.001, auto: false, mass: 5.0, kick: 0.006, ejecta: 0.6, tracer: 0xff7040, sound: 'gyro',
   },
   recoilless: {
-    id: 'recoilless', hipSpread: 0.011, adsSpread: 0.0005, name: 'RR-90 RECOILLESS', short: 'RR-90', kind: 'bullet',
-    speed: 260, projMass: 0.25, ejecta: 0, dmg: 88, headMul: 1.4, rpm: 40, mag: 1, reserve: 14, reload: 2.2,
+    id: 'recoilless', name: 'RR-90 RECOILLESS', short: 'RR-90', kind: 'bullet', hipSpread: 0.011, adsSpread: 0.0005,
+    speed: 260, projMass: 0.25, ejecta: 0, dmg: 55, headMul: 1.3, rpm: 30, mag: 1, reserve: 10, reload: 2.8,
     spread: 0.0008, auto: false, mass: 6.5, kick: 0.02, tracer: 0xff8a40, tracerW: 0.07, tracerLen: 4, sound: 'recoilless',
     backblast: { range: 7, impulse: 260, dmg: 25 },
-    splash: 4, splashDmg: 30, splashImpulse: 180, // HE slug: area damage on impact
-    homing: { cone: 0.122, accel: 90 }, // slight guidance: ~7 deg lock cone, 90 m/s^2 lateral (~1 m correction at 40 m)
+    // HE slug with a proximity fuse: arms 8 m out, bursts within 2.5 m of an enemy; blast falls off with distance squared
+    splash: 4.5, splashDmg: 40, splashImpulse: 180, splashFalloff: 2,
+    proximity: { radius: 2.5, arm: 8 },
   },
   maser: {
     id: 'maser', hipSpread: 0.005, adsSpread: 0.0004, name: 'LM-2 MASER', short: 'LM-2', kind: 'beam',
@@ -36,7 +37,7 @@ export const WEAPON_BLURB = {
   rifle: 'All-rounder. 400 m/s rounds, light recoil.',
   shotgun: 'Close range. Each shot is a 0.75 m/s escape burn.',
   gyrojet: 'Rockets that accelerate. Deadly on slow or anchored targets.',
-  recoilless: 'Slightly guided HE slug with a 4 m blast. No recoil; backblast shoves anyone behind you.',
+  recoilless: 'HE slug with a proximity fuse: bursts near enemies, blast fades fast with distance. No recoil; backblast shoves anyone behind you.',
   maser: 'Continuous yellow beam: steady damage while held, no recoil, no ammo. Overheats.',
 };
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clamp, rand, DEG, interceptTime, interceptTimeRocket, randomPerp } from './math.js';
-import { GAS_MAX, NOZZLE_F, THROW_TIME } from './soldier.js';
+import { GAS_MAX, NOZZLE_F, THROW_TIME, MAX_HP } from './soldier.js';
 import { GRENADE, MELEE } from './weapons.js';
 
 export const SKILLS = {
@@ -131,7 +131,7 @@ export class Bot {
       // threat: is this enemy pointing at me?
       const ea = e.aimDir(_v2);
       if (-d.dot(ea) / dist > 0.97) score -= 20;
-      score -= (100 - e.health) * 0.12;
+      score -= (MAX_HP - e.health) * 0.1;
       if (e === this.target) score -= 15;
       if (score < bestScore) { bestScore = score; best = e; }
     }
@@ -197,7 +197,7 @@ export class Bot {
       case 'shotgun': v = dist < 9 ? 1.6 : dist < 16 ? 0.8 : 0.08; break;
       case 'rifle': v = dist < 4 ? 0.7 : 1.0; break;
       case 'gyrojet': v = dist < 9 ? 0.05 : (relSpeed < 2 || anchored) ? 1.35 : 0.55; break;
-      case 'recoilless': v = dist < 6 ? 0.1 : (relSpeed < 3 || anchored) ? 1.25 : 0.8; break;
+      case 'recoilless': v = dist < 9 ? 0.1 : dist < 60 ? 0.95 : 0.6; break; // proximity fuse forgives aim, but it's slow
       case 'maser': v = ws.overheat ? 0 : dist < 80 ? 1.15 - ws.heat * 0.5 : 0.4; break;
       default: v = 0.5;
     }
@@ -523,7 +523,7 @@ export class Bot {
     // spinning station: cancel centrifugal pull and Coriolis drift (as far as the jets allow)
     if (w.omega) aCmd.sub(w.gravityAt(s.pos, _v3)).sub(w.coriolis(s.vel, _v3));
     if (s.gas < 0.05) aCmd.set(0, 0, 0); // dry tank: nothing to command
-    const aAxis = 4 * NOZZLE_F / s.mass;
+    const aAxis = 4 * NOZZLE_F * (g.rules.thrust || 1) / s.mass;
     aCmd.applyQuaternion(_q.copy(s.quat).invert()).divideScalar(aAxis);
     ctrl.move.set(clamp(aCmd.x, -1, 1), clamp(aCmd.y, -1, 1), clamp(aCmd.z, -1, 1));
   }
@@ -574,10 +574,12 @@ export class Bot {
     // angular error model: decays as the bot settles; grows with own rotation/acceleration
     const decay = Math.exp(-dt / sk.settle);
     this.err.multiplyScalar(decay);
-    const jitter = sk.floor * DEG * (1 + s.angVel.length() * 0.8 + (s.grab ? -0.4 : 0));
+    // judging lead gets harder with range: error grows with distance (x2 at 45 m, x3 at 90 m)
+    const rangeK = this.target ? 1 + this.target.pos.distanceTo(s.pos) / 45 : 1;
+    const jitter = sk.floor * DEG * rangeK * (1 + s.angVel.length() * 0.8 + (s.grab ? -0.4 : 0));
     this.err.x += (Math.random() - 0.5) * jitter * 0.9;
     this.err.y += (Math.random() - 0.5) * jitter * 0.9;
-    const lim = sk.floor * DEG * 1.6;
+    const lim = sk.floor * DEG * 1.6 * rangeK;
     if (this.target && this.game.time > this.acquireT + sk.settle * 2) {
       const l = this.err.length(); if (l > lim) this.err.multiplyScalar(lim / l);
     }
