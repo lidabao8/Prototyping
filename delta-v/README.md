@@ -23,6 +23,35 @@ npm install
 npm run build      # or: npm run watch / npm run serve (http://localhost:8081)
 ```
 
+## Multiplayer (peer-to-peer, free)
+
+Open the **Multiplayer** tab in the menu.
+
+* **Host:** set a callsign and click **Host game**. A match starts with your Play settings, and a 5-letter room code appears. Share it.
+* **Join:** enter the code and click **Join**. Joiners take over bots, balanced across teams, and bots keep filling the empty slots. If someone leaves, a bot takes their place.
+
+**How it works:**
+
+* The connection is WebRTC data channels through [PeerJS](https://peerjs.com). PeerJS's free public server only introduces the players; the game traffic goes directly between browsers.
+* **The host's browser runs the match:** bots, damage, kills, score, pickups and respawns. Pausing on the host keeps the match running for everyone.
+* **Each joiner flies their own suit locally,** so movement and the RCS feel instant. They stream their state at 30 Hz and send discrete actions: shots (as origin and velocity), grenades and hammer swings. The host rebuilds those shots and resolves the hits.
+* **The host streams snapshots at 20 Hz:** everyone's position, orientation, velocity, health, thrusters and beams. Other players are drawn about 100 ms in the past, interpolated between snapshots.
+* **Personal updates** go to each player as events: hitmarkers and damage numbers, incoming damage and direction, knockback, ammo refills, respawns, kills and the match result.
+
+**Connectivity:** same-LAN play connects essentially always. Over the internet it works on most home connections. Some strict networks (some mobile carriers, offices, campuses and shared-address ISPs) block direct peer connections; that would need a relay (TURN) server, which isn't included.
+
+### Hosting it on GitHub Pages (free)
+
+Multiplayer needs the page served from a normal web host. The claude.ai artifact sandbox blocks peer connections, so the artifact link is single-player only.
+
+1. Open the repository on GitHub, then **Settings → Pages**.
+2. Under **Build and deployment**, set **Source: Deploy from a branch**. Set **Branch** to this game's branch (or `main` once merged) and **Folder** to `/ (root)`, then save.
+3. After a minute the game is live at `https://<user>.github.io/<repo>/delta-v/`, for this repository `https://lidabao8.github.io/Prototyping/delta-v/`.
+
+The bundle in `dist/` is committed, so there is no build step on GitHub.
+
+**Self-hosted signalling (optional):** if the public PeerJS server is ever down, or for an offline LAN, run your own PeerServer (`npx peerjs --port 9000`) and open the game with `?peer=<host>:9000` appended to the URL. Everyone in the room must use the same `?peer=` value.
+
 ## Flight model
 
 * **The suit has 24 RCS nozzles**: four thruster quads with six nozzles each, at the corners of the backpack. Every nozzle applies its force at its own position. Net force and torque are summed as $\vec a = \tfrac{1}{m}\sum \vec F_i$ and $\vec\tau = \sum \vec r_i \times \vec F_i$.

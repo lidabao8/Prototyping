@@ -8,6 +8,7 @@ import { Bot } from './bot.js';
 import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR, HIT_THRESH } from './soldier.js';
 import { WEAPONS, WEAPON_IDS, WEAPON_BLURB } from './weapons.js';
 import { Graphics, PRESETS, normalizeGfx } from './graphics.js';
+import { Net } from './net.js';
 import { buildFPArm, buildGrenade } from './models.js';
 import { THROW_TIME } from './soldier.js';
 import { clamp, rand, raySphere } from './math.js';
@@ -115,6 +116,8 @@ class Game {
     this.state = 'menu';
     this.world = new World(this.scene, this.settings.map);
     this.gfx = new Graphics(this.renderer, this.scene, this.camera);
+    this.net = new Net(this);
+    this.netSoldiers = new Map();
     this.gfx.onResize = () => this.resize();
     this.fx = new Effects(this.scene);
     this.audio = new Audio();
@@ -152,7 +155,7 @@ class Game {
     return st;
   }
 
-  get rules() { return this.settings.rules; }
+  get rules() { return this.netRules || this.settings.rules; }
   keyLabel(action) { return keyName(this.settings.binds[action]); }
   bound(action) { return this.input.down(this.settings.binds[action]); }
   pressedAct(action) { return this.input.hit(this.settings.binds[action]); }
@@ -242,6 +245,7 @@ class Game {
     this.buildBindUI();
     this.setupLoadoutUI();
     this.setupMenuChrome();
+    this.setupNetUI();
     const rng = (id, key, out, fmt) => {
       const el = $(id); if (!el) return;
       el.value = st[key];
@@ -337,7 +341,7 @@ class Game {
     for (const id of ['optMap', 'optDiff', 'optTeam', 'optScore', 'optPri', 'optSec']) { const el = $(id); if (el) el.addEventListener('change', summary); }
     this.refreshSummary = summary;
     summary();
-    window.addEventListener('keydown', (e) => { if ((e.code === 'Enter' || e.code === 'NumpadEnter') && this.state === 'menu' && !this.input.capture) { e.preventDefault(); this.audio.init(); this.newMatch(); } });
+    window.addEventListener('keydown', (e) => { if ((e.code === 'Enter' || e.code === 'NumpadEnter') && this.state === 'menu' && !this.input.capture && !(e.target && e.target.tagName === 'INPUT')) { e.preventDefault(); this.audio.init(); this.newMatch(); } });
   }
 
   setupLoadoutUI() {
@@ -422,6 +426,29 @@ class Game {
     render();
   }
 
+  setupNetUI() {
+    const $ = (id) => document.getElementById(id);
+    if (!$('btnHost')) return;
+    const st = this.settings;
+    $('optCallsign').value = st.callsign || 'PILOT';
+    $('optCallsign').addEventListener('change', () => { st.callsign = $('optCallsign').value.replace(/[^\w -]/g, '').slice(0, 12) || 'PILOT'; $('optCallsign').value = st.callsign; this.saveSettings(); });
+    const status = (t) => { $('netStatus').textContent = t; };
+    this.net.onStatus = status;
+    if (!this.net.supported()) status('This browser cannot open peer connections.');
+    $('btnHost').addEventListener('click', () => {
+      this.audio.init();
+      status('Opening room…');
+      this.net.host((room) => { $('roomCode').textContent = room; this.newMatch(); this.hud.message(`ROOM ${room} OPEN – SHARE THE CODE`, '#9fe8ff', 5, true); });
+    });
+    $('btnJoin').addEventListener('click', () => {
+      this.audio.init();
+      const c = $('joinCode').value.trim();
+      if (c.length < 4) { status('Enter the 5-letter room code.'); return; }
+      this.net.join(c, this.callsign(), null, (why) => status(why));
+    });
+    this.refreshNetUI = () => { $('roomCode').textContent = '—'; status(this.net.supported() ? 'Not connected.' : 'This browser cannot open peer connections.'); };
+  }
+
   /** Bots pick a loadout weighted by map, match settings, role and what is earning kills this match. */
   botLoadout(s) {
     const st = this.settings, base = MAP_WEIGHTS[this.world.mapId] || MAP_WEIGHTS.hangar;
@@ -480,6 +507,7 @@ class Game {
           this.buildBindUI();
     this.setupLoadoutUI();
     this.setupMenuChrome();
+    this.setupNetUI();
         };
       });
       row.append(l, b); box.append(row);
@@ -522,11 +550,21 @@ class Game {
   }
 
   pause() { if (this.state !== 'playing') return; this.state = 'paused'; this.show('pause'); }
+
+  /** While a network match is paused locally, the world keeps running for everyone else. */
+  get simulating() { return this.state === 'playing' || (this.state === 'paused' && this.net.active); }
   resume() { this.state = 'playing'; this.show(null); this.lock(); this.last = performance.now(); }
   toMenu() {
     this.state = 'menu'; this.show('main');
     if (document.pointerLockElement) document.exitPointerLock();
+    this.net.leave(); this.netRules = null;
     this.clearMatch();
+    if (this.refreshNetUI) this.refreshNetUI();
+  }
+
+  netLost(why) {
+    this.toMenu();
+    const el = document.getElementById('netStatus'); if (el) el.textContent = why;
   }
 
   clearMatch() {
@@ -536,6 +574,7 @@ class Game {
     this.combat.projectiles.length = 0; this.combat.grenades.length = 0;
     this.soldiers = []; this.bots = []; this.player = null;
     this.intel = [new Map(), new Map()];
+    this.netSoldiers = new Map();
   }
 
   newMatch() {
@@ -556,7 +595,7 @@ class Game {
     this.timeLimit = 10 * 60;
     this.matchTime = 0;
     const names = CALLSIGNS.slice().sort(() => Math.random() - 0.5);
-    this.player = new Soldier(this, 0, 'YOU', true);
+    this.player = new Soldier(this, 0, this.net.isHost ? this.callsign() : 'YOU', true);
     this.player.mode = st.mode;
     this.adsToggled = false;
     this.soldiers.push(this.player);
@@ -614,6 +653,7 @@ class Game {
         s.grenades = 2;
         pk.cool = 20;
         if (s.isPlayer) { this.hud.message('AMMO RESUPPLIED', '#7dff9a', 1.6); this.audio.play('reload'); }
+        if (s.remote) this.net.onRefill(s);
         this.fx.sparks(pk.pos, 12, null, 3, new THREE.Color(0x7dff9a));
         break;
       }
@@ -628,9 +668,11 @@ class Game {
       const enemy = 1 - s.team;
       if (!w.inSpawn(s.pos, enemy)) { if (s.isPlayer) this.inEnemySpawn = false; continue; }
       const dir = enemy === 0 ? 1 : -1; // back toward mid-map
-      s.vel.x += dir * 14 * dt;
-      if (s.vel.x * dir < 2) s.vel.x = dir * 2;
-      if (s.grab) this.releaseGrab(s);
+      if (!s.remote && !s.netRemote) {
+        s.vel.x += dir * 14 * dt;
+        if (s.vel.x * dir < 2) s.vel.x = dir * 2;
+        if (s.grab) this.releaseGrab(s);
+      }
       this.damage(s, 35 * dt, null, 'spawn shield');
       w.barriers[enemy].mat.uniforms.flash.value = 1;
       if (s.isPlayer && !this.inEnemySpawn) { this.inEnemySpawn = true; this.hud.message('ENEMY SPAWN SHIELD – GET OUT', '#ff4b3a', 1.5); }
@@ -647,13 +689,89 @@ class Game {
       if (score > bestScore) { bestScore = score; best = p; }
     }
     const facing = new THREE.Vector3(s.team === 0 ? 1 : -1, 0, 0);
-    s.loadout = s.isPlayer ? [...this.settings.loadout] : this.botLoadout(s);
+    s.loadout = s.isPlayer ? [...this.settings.loadout] : s.prefLoadout ? [...s.prefLoadout] : this.botLoadout(s);
     s.spawn(best, facing);
     s.oobT = 0;
     s.mode = s.isPlayer ? this.settings.mode : 2;
     s.killedBy = null;
     if (s.bot) s.bot.onSpawn();
+    if (s.remote) this.net.sendSpawn(s);
     if (s.isPlayer && !initial) this.audio.play('spawn');
+  }
+
+  callsign() { return (this.settings.callsign || 'PILOT').slice(0, 12).toUpperCase(); }
+
+  // ---------------- Client-side match (joined a host) ----------------
+  startClientMatch(m) {
+    const st = this.settings;
+    this.clearMatch();
+    if (this.world.mapId !== m.cfg.map) { this.world.dispose(); this.world = new World(this.scene, m.cfg.map); this.buildGrid(); this.applyGraphics(); }
+    this.netRules = m.cfg.rules;
+    this.scoreLimit = m.cfg.scoreLimit; this.timeLimit = m.cfg.timeLimit;
+    this.teamScore = [0, 0]; this.matchTime = 0; this.weaponKills = {};
+    this.buildPickups();
+    this.player = new Soldier(this, m.team, this.callsign(), true, m.id);
+    this.player.mode = st.mode;
+    this.soldiers.push(this.player);
+    this.netSoldiers.set(m.id, this.player);
+    for (const r of m.roster) this.ensureNetSoldier([r.id, r.team, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, '', r.name]);
+    this.state = 'playing'; this.show(null);
+    this.hud.feed = []; this.hud.msgs = [];
+    this.hud.message(`JOINED ROOM ${m.room}`, '#9fe8ff', 3, true);
+    this.lock();
+    this.last = performance.now();
+  }
+
+  ensureNetSoldier(rec) {
+    const [id, team] = rec;
+    let s = this.netSoldiers.get(id);
+    if (!s) {
+      s = new Soldier(this, team, rec[22] || '?', false, id);
+      s.netRemote = true;
+      this.soldiers.push(s); this.netSoldiers.set(id, s);
+    }
+    if (s === this.player) { s.kills = rec[18]; s.deaths = rec[19]; return s; }
+    const lo = rec[21] ? rec[21].split(',') : null;
+    if (lo && lo.length === 2 && lo.every((w) => WEAPONS[w]) && (!s.loadout || s.loadout.join(',') !== rec[21])) { s.loadout = lo; s.reset(); }
+    s.alive = !!rec[2]; s.cur = Math.min(rec[14] || 0, s.weapons.length - 1);
+    s.kills = rec[18]; s.deaths = rec[19]; if (rec[22]) s.name = rec[22];
+    s.model.root.visible = true;
+    return s;
+  }
+
+  clientSpawn(m) {
+    const p = this.player;
+    if (!p) return;
+    p.loadout = m.lo && m.lo.length === 2 ? m.lo : [...this.settings.loadout];
+    p.spawn(new THREE.Vector3().fromArray(m.p), new THREE.Vector3(p.team === 0 ? 1 : -1, 0, 0));
+    p.quat.fromArray(m.q);
+    p.mode = this.settings.mode; p.killedBy = null;
+    this.audio.play('spawn');
+  }
+
+  clientDeath(me) {
+    const p = this.player;
+    p.alive = false; p.health = 0; p.leaks = []; p.grab = null; p.walking = false;
+    p.killedBy = this.netSoldiers.get(me.kb) || null; p.killCause = me.kc;
+  }
+
+  clientKill(m) {
+    const k = this.netSoldiers.get(m.k) || null, v = this.netSoldiers.get(m.v);
+    if (!v) return;
+    this.hud.kill(k, v, m.c, m.h);
+    if (k === this.player && v !== this.player) this.hud.message(`ELIMINATED ${v.name}${m.h ? ' – HEADSHOT' : ''}`, '#ff4b3a', 1.8);
+  }
+
+  clientHurt(m) {
+    if (m.f) this.hud.damageFrom(new THREE.Vector3().fromArray(m.f));
+    if (m.a > 0.5) this.audio.play('hurt');
+  }
+
+  clientHit(m) {
+    this.hud.hit(m.h, m.k);
+    const t = this.netSoldiers.get(m.id);
+    if (this.settings.dmgNumbers && t) this.hud.damageNumber(t, new THREE.Vector3().fromArray(m.p), m.a, m.h, m.k);
+    this.audio.play(m.k ? 'kill' : m.h ? 'head' : 'hit');
   }
 
   // ---------------- Events from simulation ----------------
@@ -711,6 +829,11 @@ class Game {
 
   damage(s, amount, attacker, cause, point, part) {
     if (!s.alive) return;
+    if (this.net.isClient) {
+      // the host owns health; report only what only we can see (our own wall and landing hits)
+      if (s === this.player && !attacker && (cause === 'impact' || cause === 'landing' || cause === 'cargo pod')) this.net.sendSelfDamage(amount, cause);
+      return;
+    }
     if (s.spawnProtect > 0 && cause !== 'hypoxia') return;
     if (attacker && attacker.team !== s.team && this.world.inSpawn(s.pos, s.team)) return; // shielded spawn bay
     s.health -= amount;
@@ -727,6 +850,7 @@ class Game {
       this.hud.damageFrom(attacker ? attacker.pos : point);
       this.audio.play('hurt');
     }
+    this.net.onDamage(s, amount, attacker, point, part, killed);
     if (killed) this.kill(s, attacker, cause, part === 'head');
   }
 
@@ -747,17 +871,20 @@ class Game {
     }
     s.killedBy = killer; s.killCause = cause;
     this.hud.kill(killer, s, cause, head);
+    this.net.onKill(killer, s, cause, head);
     if (s.bot) s.bot.target = null;
     for (const m of this.intel) m.delete(s.id);
     if (this.teamScore[0] >= this.scoreLimit || this.teamScore[1] >= this.scoreLimit) setTimeout(() => this.endMatch(), 1200);
   }
 
-  endMatch() {
+  endMatch(fromNet = false, netWon = null) {
     if (this.state !== 'playing' && this.state !== 'paused') return;
+    if (this.net.isClient && !fromNet) return; // the host calls the result
     // slow-motion outro with a banner, then the results screen
     this.state = 'ending'; this.endT = 0;
     this.show(null);
-    this.endWon = this.teamScore[0] > this.teamScore[1] ? 0 : this.teamScore[1] > this.teamScore[0] ? 1 : -1;
+    this.endWon = fromNet ? netWon : this.teamScore[0] > this.teamScore[1] ? 0 : this.teamScore[1] > this.teamScore[0] ? 1 : -1;
+    if (this.net.isHost) this.net.onEnd(this.endWon);
     this.audio.play(this.endWon === 0 ? 'kill' : 'warn');
   }
 
@@ -894,6 +1021,28 @@ class Game {
   }
 
   // ---------------- Simulation ----------------
+  /** Joined a host: fly our own suit, draw everyone else from snapshots, show shots as visuals. */
+  clientTick(dt) {
+    this.time += dt;
+    this.matchTime += dt;
+    if (this.state === 'playing') this.playerControl(dt);
+    const p = this.player;
+    this.acc += dt;
+    let n = 0;
+    while (this.acc >= STEP && n < 8) {
+      if (p) p.step(STEP);
+      this.combat.step(STEP);
+      this.acc -= STEP; n++;
+    }
+    if (n === 8) this.acc = 0;
+    if (p && p.alive) p.update(dt);
+    // spawn-shield shove for our own suit (the host applies the burn)
+    if (p && p.alive && this.world.inSpawn(p.pos, 1 - p.team)) { const dir = p.team === 1 ? 1 : -1; p.vel.x += dir * 14 * dt; if (p.vel.x * dir < 2) p.vel.x = dir * 2; }
+    for (const pk of this.pickups || []) { pk.mesh.rotation.y += dt * 0.8; pk.ring.visible = pk.cool <= 0; pk.mesh.scale.setScalar(pk.cool <= 0 ? 1 : 0.55); }
+    this.emitThrusterFx(dt);
+    this.net.tick(dt);
+  }
+
   substep(dt) {
     for (const s of this.soldiers) s.step(dt);
     this.combat.step(dt);
@@ -956,10 +1105,12 @@ class Game {
     this.frameDt = dt;
     this.planBudget = 2;
     if (this.world) this.world.expBudget = 300;
-    if (this.state === 'playing') {
+    if (this.net.isClient && this.simulating) this.clientTick(dt);
+    else if (this.simulating) {
       this.time += dt;
       this.matchTime += dt;
-      this.playerControl(dt);
+      if (this.state === 'playing') this.playerControl(dt);
+      else if (this.player) this.player.ctrl.move.set(0, 0, 0);
       for (const b of this.bots) b.update(dt);
       this.acc += dt;
       let n = 0;
@@ -981,6 +1132,7 @@ class Game {
       this.updatePickups(dt);
       this.updateSpawnShields(dt);
       this.emitThrusterFx(dt);
+      this.net.tick(dt);
     } else if (this.state === 'menu') {
       this.time += dt;
       this.world.updatePods(dt, this.time);

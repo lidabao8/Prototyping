@@ -170,6 +170,7 @@ export class HUD {
 
     this.drawScore();
     this.drawFeed(dt);
+    this.drawRoom();
     if (!p) return;
     if (p.alive) {
       if (game.showGrid || p.angVel.length() > 1.4) { /* grid drawn in 3D */ }
@@ -221,6 +222,17 @@ export class HUD {
     const mm = Math.floor(tl / 60), ss = Math.floor(tl % 60);
     this.num(`${mm}:${ss.toString().padStart(2, '0')}`, cx, y + 16, 18, tl < 60 ? WARN : '#e9eef2', 'center');
     this.spaced(`FIRST TO ${lim}`, cx, y + 33, 9, '#8996a1', 'center', 700, 3);
+  }
+
+  drawRoom() {
+    const net = this.game.net;
+    if (!net.active || !net.room) return;
+    const humans = this.game.soldiers.filter((s) => s.isPlayer || s.remote || (s.netRemote && !/·BOT$/.test(s.name))).length;
+    const label = `${net.isHost ? 'HOSTING' : 'ONLINE'} · ROOM ${net.room}`;
+    this.plate(18, 14, 210, 24, 6, 'rgba(6,10,16,0.6)', 'rgba(159,232,255,0.3)');
+    this.spaced(label, 28, 27, 11, '#9fe8ff', 'left', 700, 2);
+    this.spaced(net.isHost ? `${net.clients.size + 1} HUMANS` : '', 220, 27, 9, '#8996a1', 'right', 700, 1);
+    void humans;
   }
 
   drawFeed(dt) {

@@ -106,6 +106,9 @@
   .btn { background:var(--panel2); color:var(--text); border:1px solid var(--line2); padding:12px 22px; font-size:15px; font-weight:700; letter-spacing:0.24em; clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px); }
   .btn:hover { border-color:var(--hud); background:rgba(159,232,255,0.1); }
   .btn.primary { background:var(--hud); color:#021018; border-color:var(--hud); }
+  input[type=text] { background:#0b1118; color:var(--text); border:1px solid var(--line); padding:8px 10px; font-family:inherit; font-size:16px; letter-spacing:0.12em; text-transform:uppercase; width:100%; }
+  .roomcode { font-size:12px; letter-spacing:0.3em; color:var(--dim); font-weight:700; }
+  .roomcode b { font-family:var(--f-disp); font-size:30px; color:var(--accent); letter-spacing:0.18em; margin-left:10px; user-select:text; }
   .ver { font-size:11px; letter-spacing:0.2em; color:rgba(137,150,161,0.6); }
 
   /* ---------- pause / end ---------- */
@@ -157,6 +160,7 @@
         <button class="tab" data-tab="loadout" role="tab">LOADOUT</button>
         <button class="tab" data-tab="settings" role="tab">SETTINGS</button>
         <button class="tab" data-tab="controls" role="tab">CONTROLS</button>
+        <button class="tab" data-tab="online" role="tab">MULTIPLAYER</button>
       </nav>
     </header>
     <main class="mm-body">
@@ -228,6 +232,29 @@
               <label><input type="checkbox" id="rule_thrusterDamage"><span>Thruster damage<small>lost quads cause coupled spin</small></span></label>
               <label><input type="checkbox" id="rule_infiniteGas"><span>Infinite gas<small>no Δv budget</small></span></label>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" data-pane="online">
+        <div class="cols">
+          <div class="box stack">
+            <h3>HOST A ROOM</h3>
+            <label>Callsign<input type="text" id="optCallsign" maxlength="12" autocomplete="off"></label>
+            <div class="desc">Starts a match with your Play settings and opens a room. Friends who join take over bots, balanced across teams; bots fill the rest. Your browser runs the match.</div>
+            <div class="row"><button class="btn primary" id="btnHost" type="button">HOST GAME</button></div>
+            <div class="roomcode">ROOM <b id="roomCode">—</b></div>
+          </div>
+          <div class="box stack">
+            <h3>JOIN A ROOM</h3>
+            <label>Room code<input type="text" id="joinCode" maxlength="5" autocomplete="off" placeholder="ABCDE"></label>
+            <div class="desc">You join the host's map and rules with your own loadout. You fly your suit locally; the host decides hits and score.</div>
+            <div class="row"><button class="btn primary" id="btnJoin" type="button">JOIN</button></div>
+          </div>
+          <div class="box stack">
+            <h3>CONNECTION</h3>
+            <div class="desc hl" id="netStatus">Not connected.</div>
+            <div class="desc">Peer-to-peer over WebRTC. Works on the same LAN essentially always, and over the internet on most home networks. Some strict networks (mobile carriers, offices, campuses) block direct connections. It needs the page served from a normal web host such as GitHub Pages. The claude.ai artifact sandbox blocks peer connections.</div>
           </div>
         </div>
       </section>

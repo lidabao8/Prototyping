@@ -12,5 +12,8 @@
   "devDependencies": {
     "esbuild": "0.24.0",
     "three": "0.170.0"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.4"
   }
 }

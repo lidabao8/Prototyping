@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { raySphere, randomPerp, rand, interceptTime } from './math.js';
 import { HITBOXES, TOWERS, THROW_TIME } from './soldier.js';
-import { GRENADE, MELEE } from './weapons.js';
+import { GRENADE, MELEE, WEAPONS } from './weapons.js';
+const r3 = (x) => Math.round(x * 1000) / 1000;
 import { COLORS } from './effects.js';
 import { buildGrenade } from './models.js';
 
@@ -77,6 +78,7 @@ export class Combat {
     const base = target.sub(origin).normalize();
     const n = def.kind === 'pellets' ? def.pellets : 1;
     const lock = def.homing ? this.homingTarget(s, eye, aim, def.homing.cone) : null;
+    const netList = [];
     for (let i = 0; i < n; i++) {
       const d = base.clone();
       const sp = this.spreadOf(s, def) * Math.sqrt(Math.random());
@@ -86,6 +88,8 @@ export class Combat {
         dir: d, owner: s, def, age: 0, kind: def.kind, color: this.color(def.tracer), tail: def.kind === 'rocket' ? 0.02 : (def.tracerLen || 4) / def.speed,
       };
       if (lock) p.homing = lock;
+      if (this.game.net.isClient) p.visual = true;
+      netList.push([[r3(p.pos.x), r3(p.pos.y), r3(p.pos.z)], [r3(p.vel.x), r3(p.vel.y), r3(p.vel.z)]]);
       if (def.kind === 'rocket') {
         p.mesh = new THREE.Mesh(this.rGeo, this.rMat);
         p.mesh.position.copy(p.pos); p.mesh.lookAt(_v.copy(p.pos).add(d));
@@ -100,10 +104,67 @@ export class Combat {
     s.kick.y += def.kick * (Math.random() - 0.5) * 0.8;
     s.addAim(def.kick * (Math.random() - 0.5) * 0.5, def.kick * (0.6 + Math.random() * 0.5));
     g.fx.muzzle(muzzle, aim, s.vel, def.kind === 'pellets');
-    if (def.backblast) this.backblast(s, aim, muzzle, def.backblast);
+    if (def.backblast && !g.net.isClient) this.backblast(s, aim, muzzle, def.backblast);
+    if (g.net.isClient && s.isPlayer) g.net.sendFire(def, netList);
+    else if (g.net.isHost) g.net.onLocalShot(s, def, netList);
     g.onShot(s, def);
     if (w.mag === 0 && w.reserve > 0) setTimeout(() => { if (s.alive && s.weapon === w) s.startReload(); }, 250);
     return true;
+  }
+
+  /** Host: a remote player's shot, rebuilt from the origin/velocity they sent. */
+  spawnNetProjectile(s, def, o, v) {
+    const pos = new THREE.Vector3().fromArray(o), vel = new THREE.Vector3().fromArray(v);
+    const dir = vel.clone().sub(s.vel).normalize();
+    const p = { pos, vel, start: pos.clone(), dir, owner: s, def, age: 0, kind: def.kind, color: this.color(def.tracer), tail: def.kind === 'rocket' ? 0.02 : (def.tracerLen || 4) / def.speed };
+    if (def.homing) p.homing = this.homingTarget(s, s.eye(new THREE.Vector3()), dir, def.homing.cone);
+    this.addProjectileMesh(p);
+    this.projectiles.push(p);
+    this.game.fx.muzzle(pos, dir, s.vel, def.kind === 'pellets');
+  }
+
+  /** Client: someone else's shot, drawn locally (no damage here; the host decides). */
+  netShot(m) {
+    const g = this.game, s = g.netSoldiers && g.netSoldiers.get(m.s), def = WEAPONS[m.w];
+    if (!def) return;
+    for (const [o, v] of m.list) {
+      const pos = new THREE.Vector3().fromArray(o), vel = new THREE.Vector3().fromArray(v);
+      const p = { pos, vel, start: pos.clone(), dir: vel.clone().normalize(), owner: s || g.player, def, age: 0, kind: def.kind, color: this.color(def.tracer), tail: def.kind === 'rocket' ? 0.02 : (def.tracerLen || 4) / def.speed, visual: true };
+      this.addProjectileMesh(p);
+      this.projectiles.push(p);
+    }
+    if (s) { s.lastFireT = g.time; g.fx.muzzle(new THREE.Vector3().fromArray(m.list[0][0]), new THREE.Vector3().fromArray(m.list[0][1]).normalize(), s.vel, def.kind === 'pellets'); g.audio.play(def.sound, g.distToListener(s.pos)); }
+  }
+
+  addProjectileMesh(p) {
+    if (p.def.kind !== 'rocket') return;
+    p.mesh = new THREE.Mesh(this.rGeo, this.rMat);
+    p.mesh.position.copy(p.pos);
+    this.game.scene.add(p.mesh);
+  }
+
+  spawnGrenadeMesh(team, pos) {
+    const mesh = this.gProto[team].clone(true);
+    mesh.scale.setScalar(1.4);
+    const lamp = mesh.children.find((c) => c.geometry && c.geometry.type === 'SphereGeometry');
+    if (lamp) { lamp.material = lamp.material.clone(); mesh.userData.lamp = lamp; mesh.userData.lampColor = lamp.material.color.clone(); }
+    mesh.position.copy(pos);
+    this.game.scene.add(mesh);
+    return mesh;
+  }
+
+  /** Host: a remote player's grenade. */
+  spawnNetGrenade(s, o, v) {
+    s.grenades = Math.max(0, s.grenades - 1);
+    const pos = new THREE.Vector3().fromArray(o), vel = new THREE.Vector3().fromArray(v);
+    this.grenades.push({ pos, vel, owner: s, fuse: GRENADE.fuse, mesh: this.spawnGrenadeMesh(s.team, pos), spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)) });
+  }
+
+  /** Client: anyone's grenade, simulated locally for visuals (it explodes harmlessly here). */
+  netGrenade(m) {
+    const g = this.game, s = g.netSoldiers && g.netSoldiers.get(m.s);
+    const pos = new THREE.Vector3().fromArray(m.o), vel = new THREE.Vector3().fromArray(m.v);
+    this.grenades.push({ pos, vel, owner: s || g.player, fuse: GRENADE.fuse, mesh: this.spawnGrenadeMesh(s ? s.team : 0, pos), spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)), visual: true });
   }
 
   /** Enemy closest to the line of fire inside the guidance cone, with line of sight. */
@@ -155,11 +216,12 @@ export class Combat {
   }
 
   /** Continuous beam: called every frame the trigger is held; damage scales with frame time. */
-  fireBeam(s, w, def) {
+  fireBeam(s, w, def, noHeat = false, visualOnly = false) {
     const g = this.game;
-    if (w.overheat) { if (s.isPlayer && w.cool <= 0) { g.audio.play('empty'); w.cool = 0.3; } return false; }
+    if (g.net.isClient) visualOnly = true;
+    if (w.overheat && !noHeat) { if (s.isPlayer && w.cool <= 0) { g.audio.play('empty'); w.cool = 0.3; } return false; }
     const dt = Math.min(0.05, g.frameDt || 1 / 60);
-    w.heat += def.heatRate * dt;
+    if (!noHeat) w.heat += def.heatRate * dt;
     if (w.heat >= 1) { w.heat = 1; w.overheat = true; if (s.isPlayer) g.hud.message('MASER OVERHEATED – VENTING', '#ffcc4d', 1.2); }
     s.spawnProtect = 0;
     s.lastFireT = g.time;
@@ -177,7 +239,7 @@ export class Combat {
     if (!s.beam || s.beam.life <= 0) { s.beam = { a: new THREE.Vector3(), b: new THREE.Vector3(), life: 0 }; this.beams.push(s.beam); }
     if (s.beam.life > 0) s.beam.b.lerp(hp, Math.min(1, dt * 30)); else s.beam.b.copy(hp);
     s.beam.a.copy(muzzle); s.beam.life = 0.14;
-    if (hit) {
+    if (hit && !visualOnly) {
       const t = hit.s;
       if (t.team !== s.team && t.spawnProtect <= 0) {
         const dmg = def.dps * dt * (hit.part.part === 'head' ? def.headMul : hit.part.part === 'leg' ? 0.75 : 1);
@@ -193,7 +255,7 @@ export class Combat {
     while (w.sparkAcc >= 1) { w.sparkAcc -= 1; g.fx.sparks(hp, 1, hit ? d.clone().negate() : (h ? h.n : d.clone().negate()), 2.5, COLORS.beam); }
     g.fx.add.spawn(hp, null, COLORS.beam, 0.32, 0.05, { alpha: 0.8 });
     w.sndT = (w.sndT || 0) - dt;
-    if (w.sndT <= 0) { w.sndT = 0.12; g.onShot(s, def); }
+    if (w.sndT <= 0) { w.sndT = 0.12; if (visualOnly) g.audio.play(def.sound, s.isPlayer ? 0 : g.distToListener(s.pos)); else g.onShot(s, def); }
     return true;
   }
 
@@ -244,6 +306,9 @@ export class Combat {
     this.grenades.push({ pos, vel, owner: s, fuse: GRENADE.fuse, mesh, spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)) });
     this.game.audio.play('throw', s.isPlayer ? 0 : this.game.distToListener(pos));
     this.game.onThrow(s, pos);
+    const last = this.grenades[this.grenades.length - 1];
+    if (this.game.net.isClient && s.isPlayer) { last.visual = true; this.game.net.sendThrow(pos, vel); }
+    else if (this.game.net.isHost) this.game.net.onLocalThrow(s, pos, vel);
     return true;
   }
 
@@ -251,6 +316,7 @@ export class Combat {
     if (!s.alive || s.meleeCool > 0 || s.throwT > 0) return false;
     s.meleeCool = MELEE.cooldown;
     s.meleeT = 0.35;
+    if (this.game.net.isClient && s.isPlayer) { this.game.net.sendMelee(); this.game.audio.play('melee'); return true; }
     s.spawnProtect = 0;
     const g = this.game;
     const eye = s.eye(new THREE.Vector3()), aim = s.aimDir(new THREE.Vector3());
@@ -365,6 +431,13 @@ export class Combat {
 
   onHit(p, hp, dir, kind, obj, part, n) {
     const g = this.game, def = p.def;
+    if (p.visual) {
+      // client-side copy: show the impact, the host applies damage and knockback
+      if (kind === 'soldier') g.fx.suitHit(hp, dir.clone().negate(), obj.vel);
+      else if (kind !== 'barrier') g.fx.impact(hp, n || dir.clone().negate());
+      if (def.splash) this.explode(hp, p.owner, def.splash, def.splashDmg, def.splashImpulse || 140, def.id);
+      return;
+    }
     if (kind === 'barrier') {
       obj.mat.uniforms.flash.value = 1;
       g.fx.sparks(hp, 10, n, 4, obj.mat.uniforms.color.value);
@@ -408,6 +481,7 @@ export class Combat {
     const g = this.game;
     g.fx.explosion(pos, radius * 0.35);
     g.audio.play('explosion', g.distToListener(pos));
+    if (g.net.isClient) return; // visuals only; the host resolves damage
     g.onExplosion(pos, owner);
     for (const s of g.soldiers) {
       const d = s.pos.distanceTo(pos);

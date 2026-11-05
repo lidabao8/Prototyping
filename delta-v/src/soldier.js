@@ -124,8 +124,9 @@ function buildModel(team) {
 let NEXT_ID = 1;
 
 export class Soldier {
-  constructor(game, team, name, isPlayer = false) {
-    this.id = NEXT_ID++;
+  constructor(game, team, name, isPlayer = false, forceId = null) {
+    this.id = forceId != null ? forceId : NEXT_ID++;
+    if (forceId != null) NEXT_ID = Math.max(NEXT_ID, forceId + 1);
     this.game = game;
     this.team = team;
     this.name = name;
@@ -280,6 +281,8 @@ export class Soldier {
   /** Impulse J (world, N·s) applied at world point p. */
   applyImpulse(J, p, unintended = true) {
     if (unintended === 'recoil' ? !this.game.rules.recoil : unintended && !this.game.rules.knockback) return;
+    // a remote human flies their own suit: forward the shove to their machine
+    if (this.remote) { this.game.net.onImpulse(this, J, p); return; }
     if (this.grab && this.grab.kind !== 'pod') {
       // anchored: a strong hit can knock you off the handhold
       if (J.length() > 120) this.grab = null; else return;
@@ -394,6 +397,7 @@ export class Soldier {
 
   // ---------- Physics step ----------
   step(dt) {
+    if (this.remote || this.netRemote) return; // state streams in over the network
     const world = this.game.world;
     const I = this.inertia(_I);
     const m = this.mass;
