@@ -190,10 +190,10 @@ The HUD shows:
 * Rotation-rate arcs around the reticle for yaw, pitch and roll.
 * Range, relative velocity and closing speed to whatever is under the crosshair.
 * Hitmarkers that pop and fade: white for body hits, yellow for headshots, red with a ring for kills. Optional floating damage numbers stack rapid hits.
-* Hit sounds are synthesized:
-  * Hit: a crisp tick, rate-limited for beams.
-  * Headshot: the tick plus a metallic "dink".
-  * Kill: a low punch, a rising three-note chime and an airy swish. Headshot kills get a brighter chime and an extra ring.
+* Hit sounds are synthesized, percussive and dark rather than musical:
+  * Hit: a sharp high-passed click, a mid "tock" and a short low thump for depth, rate-limited for beams.
+  * Headshot: adds a crisper second transient and a brief inharmonic metal tick.
+  * Kill: a sub drop, a hard click, a muted metallic clank and a low filtered power-fifth stab. Headshot kills add a sharp crack.
 * A `COLLISION x.x s` time-to-impact warning.
 * Δv, N₂, HP and O₂ readouts, and a suit diagram showing quad health, nozzle activity and leaks.
 * An optional reference grid (H). It also fades in automatically when you tumble.

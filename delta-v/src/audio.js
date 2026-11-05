@@ -59,25 +59,60 @@ export class Audio {
     o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
   }
 
-  /** Hitmarker: crisp tick (filtered noise click + short high sine). Rate-limited for beams. */
-  hitTick(head) {
-    const now = performance.now();
-    if (now - (this._lastHit || 0) < (head ? 40 : 70)) return;
-    this._lastHit = now;
-    const j = 1 + (Math.random() - 0.5) * 0.08;
-    this.burst({ freq: 5200 * j, q: 2.5, type: 'bandpass', dur: 0.035, gain: 0.32 });
-    this.tone(2900 * j, 0.06, 0.12, 'triangle');
-    if (head) { this.tone(2650, 0.28, 0.13, 'sine', 0.01); this.tone(3980, 0.22, 0.08, 'sine', 0.01); this.tone(5300, 0.12, 0.04, 'sine', 0.012); }
+  /** Precisely timed filtered noise hit (no random start offset), for transients. */
+  noiseHit(type, freq, q, dur, gain, delay = 0, attack = 0.001) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + delay;
+    const src = this.ctx.createBufferSource(); src.buffer = this.noise;
+    const f = this.ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
   }
 
-  /** Kill confirm: low punch, rising three-note chime, airy swish; headshot kills ring brighter. */
+  /** Oscillator through a low-pass, for dark tonal layers. */
+  darkTone(freq, dur, gain, type = 'sawtooth', cutoff = 900, delay = 0, glideTo = null) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + delay;
+    const o = this.ctx.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + dur);
+    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(cutoff, t); f.frequency.exponentialRampToValueAtTime(Math.max(80, cutoff * 0.3), t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(f); f.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  /** Hitmarker: a clicky transient with body underneath (no musical ring). Rate-limited for beams. */
+  hitTick(head) {
+    const now = performance.now();
+    if (now - (this._lastHit || 0) < (head ? 45 : 70)) return;
+    this._lastHit = now;
+    const j = 1 + (Math.random() - 0.5) * 0.06;
+    this.noiseHit('highpass', 3200 * j, 0.7, 0.012, 0.42);            // sharp click
+    this.noiseHit('bandpass', 1250 * j, 3.5, 0.035, 0.32);            // mid "tock"
+    this.tone(200 * j, 0.085, 0.36, 'sine', 0, 80);                // low body thump (depth)
+    if (head) {
+      this.noiseHit('highpass', 5200, 0.9, 0.009, 0.3, 0.004);       // crisper second transient
+      this.darkTone(2290, 0.07, 0.035, 'square', 4200, 0.006);    // short inharmonic metal tick
+      this.darkTone(3170, 0.05, 0.025, 'square', 5000, 0.006);
+    }
+  }
+
+  /** Kill confirm: heavy and grim - sub drop, hard click, muted clank, low filtered power-fifth stab. */
   killConfirm(head) {
-    this.tone(150, 0.22, 0.45, 'sine', 0, 55);
-    this.burst({ freq: 320, dur: 0.12, gain: 0.35, type: 'lowpass' });
-    const base = head ? 1046.5 : 880;
-    [1, 1.25, 1.5].forEach((m, i) => { this.tone(base * m, 0.45 - i * 0.05, 0.12, 'triangle', 0.045 * i); this.tone(base * m * 2, 0.3, 0.035, 'sine', 0.045 * i); });
-    this.burst({ freq: 6000, q: 0.8, type: 'highpass', dur: 0.25, gain: 0.07 });
-    if (head) this.tone(3136, 0.5, 0.06, 'sine', 0.14);
+    this.tone(120, 0.38, 0.55, 'sine', 0, 38);                     // sub drop
+    this.noiseHit('highpass', 2600, 0.7, 0.016, 0.5);                 // hard click
+    this.noiseHit('bandpass', 1000, 2.5, 0.05, 0.38);                 // tock
+    this.noiseHit('bandpass', 620, 3, 0.2, 0.22, 0.012);              // muted metallic clank
+    this.darkTone(110, 0.42, 0.13, 'sawtooth', 950, 0.02);         // low power fifth
+    this.darkTone(164.8, 0.4, 0.09, 'sawtooth', 950, 0.02);
+    this.darkTone(55, 0.45, 0.12, 'triangle', 400, 0.02);
+    if (head) {
+      this.noiseHit('highpass', 4500, 0.8, 0.03, 0.32, 0.002);       // crack
+      this.darkTone(220, 0.5, 0.05, 'sawtooth', 1600, 0.03);
+    }
   }
 
   beep(freq, dur = 0.08, gain = 0.15, type = 'square') {
