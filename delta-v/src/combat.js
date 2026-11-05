@@ -330,6 +330,7 @@ export class Combat {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const gr = this.grenades[i];
       gr.fuse -= dt;
+      if (world.omega) { gr.vel.addScaledVector(world.gravityAt(gr.pos, _v), dt); gr.vel.addScaledVector(world.coriolis(gr.vel, _v2), dt); }
       const prev = _v3.copy(gr.pos);
       gr.pos.addScaledVector(gr.vel, dt);
       if (world.barrierCross(prev, gr.pos, 1 - gr.owner.team) >= 0) { gr.pos.copy(prev); gr.vel.x *= -GRENADE.restitution; world.barriers[1 - gr.owner.team].mat.uniforms.flash.value = 1; }

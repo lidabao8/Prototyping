@@ -172,6 +172,7 @@ export class Soldier {
     this.meleeCool = 0;
     this.throwT = 0; this.throwDir = null; this.meleeT = 0;
     this.ads = false; this.adsAmt = 0;
+    this.walking = false; this.jumpGrace = 0; this.walkTarget = null;
     this.lastDamageT = -99;
     this.lastThrustT = -99;
     this.lastAttacker = null;
@@ -215,6 +216,20 @@ export class Soldier {
 
   /** Turn the body so it faces a world direction (shortest arc). The attitude-hold target turns with it. */
   setAimDir(d) {
+    if (this.walking) {
+      // upright on a floor: yaw the body about local up, pitch only the head
+      const up = _v4.set(0, 1, 0).applyQuaternion(this.quat);
+      const dp = _v.copy(d).addScaledVector(up, -d.dot(up));
+      if (dp.lengthSq() > 1e-6) {
+        dp.normalize();
+        const f = this.forward(_v2); f.addScaledVector(up, -f.dot(up)).normalize();
+        const ang = Math.atan2(up.dot(_v3.crossVectors(f, dp)), f.dot(dp));
+        this.quat.premultiply(_q.setFromAxisAngle(up, ang)).normalize();
+      }
+      this.aimPitch = Math.asin(clamp(d.dot(up) / d.length(), -1, 1));
+      this.aimPitch = clamp(this.aimPitch, -1.45, 1.45);
+      return;
+    }
     const f = this.forward(_v2);
     _q.setFromUnitVectors(f, _v.copy(d).normalize());
     this.quat.premultiply(_q).normalize();
@@ -238,6 +253,11 @@ export class Soldier {
 
   /** Mouse look: yaw about the body's own up axis, pitch about its right axis (no world "up" in orbit). */
   addAim(dYaw, dPitch) {
+    if (this.walking) {
+      this.quat.multiply(_q.setFromAxisAngle(_AY, dYaw)).normalize();
+      this.aimPitch = clamp(this.aimPitch + dPitch, -1.45, 1.45);
+      return;
+    }
     _q.setFromAxisAngle(_AY, dYaw);
     _q2.setFromAxisAngle(_AX, dPitch);
     _q.multiply(_q2);
@@ -251,6 +271,7 @@ export class Soldier {
     this.pos.copy(pos);
     this.quat.setFromUnitVectors(new THREE.Vector3(0, 0, -1), facing.clone().normalize());
     this.model.root.visible = !this.isPlayer;
+    this.walking = false; this.aimPitch = 0; this.aimYaw = 0;
   }
 
   /** Impulse J (world, N·s) applied at world point p. */
@@ -365,6 +386,7 @@ export class Soldier {
       this.stepGrabbed(dt);
       return;
     }
+    if (this.alive && this.walking) { this.stepWalk(dt, world); return; }
     let F = null, T = null;
     if (this.alive) {
       this.flightComputer(dt);
@@ -374,6 +396,11 @@ export class Soldier {
     const Fw = _Fw.set(0, 0, 0), Tb = _Tb.set(0, 0, 0);
     if (F && this.throttle.some((x) => x > 0)) { Fw.copy(F).applyQuaternion(this.quat); Tb.copy(T); }
     // suit leaks: gas escapes along leak normal, pushing the body the other way
+    if (world.omega && !this.grab) {
+      // rotating frame: centrifugal pull outward from the axis, Coriolis sideways
+      Fw.addScaledVector(world.gravityAt(this.pos, _g1), m);
+      Fw.addScaledVector(world.coriolis(this.vel, _g1), m);
+    }
     if (this.game.rules.breaches) for (const lk of this.leaks) {
       const f = _v.copy(lk.n).multiplyScalar(-28);
       Tb.add(_v2.crossVectors(lk.p, f));
@@ -402,6 +429,7 @@ export class Soldier {
     q.normalize();
     // collisions
     this.collide(dt, world);
+    if (this.alive && world.omega) this.tryLand(world);
   }
 
   stepGrabbed(dt) {
@@ -430,6 +458,80 @@ export class Soldier {
       _q.setFromAxisAngle(_v.copy(w).divideScalar(wl), wl * dt);
       this.quat.multiply(_q).normalize();
     }
+  }
+
+  /** On a spinning map: touching the floor feet-down switches to walking. */
+  tryLand(world) {
+    if (this.jumpGrace > 0) return;
+    const up = world.upAt(this.pos, _w1);
+    const gmag = world.gravityAt(this.pos, _g1).length();
+    if (gmag < 0.8) return;
+    const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.3, true);
+    if (!h || h.n.dot(up) < 0.7) return;
+    const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
+    if (bodyUp.dot(up) < 0.35) return; // landed on your back or head: tumble instead
+    // legs absorb more than a body slam
+    const vn = -this.vel.dot(up);
+    if (vn > 11) this.game.damage(this, (vn - 11) * 16, null, 'landing', this.pos.clone().addScaledVector(up, -1));
+    if (vn > 2) this.game.onImpact(this, vn, this.pos.clone().addScaledVector(up, -1.05), up.clone());
+    const view = this.aimDir(_w3).clone();
+    this.quat.premultiply(_q.setFromUnitVectors(bodyUp, up)).normalize();
+    this.aimPitch = 0; this.aimYaw = 0;
+    this.walking = true; this.holdQ = null;
+    this.angVel.set(0, 0, 0);
+    this.vel.addScaledVector(up, -this.vel.dot(up));
+    this.setAimDir(view);
+  }
+
+  leaveWalk() {
+    // fold head pitch back into the body so the view doesn't jump
+    this.walking = false;
+    this.quat.multiply(_q.setFromAxisAngle(_AX, this.aimPitch)).normalize();
+    this.aimPitch = 0; this.aimYaw = 0;
+    this.jumpGrace = 0.35;
+  }
+
+  /** Walking on the drum floor: no RCS, legs and friction do the work. */
+  stepWalk(dt, world) {
+    this.throttle.fill(0);
+    const up = world.upAt(this.pos, _w1);
+    const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.6, true);
+    const g = world.gravityAt(this.pos, _g1);
+    if (!h || h.n.dot(up) < 0.6 || g.length() < 0.5) { this.leaveWalk(); return; }
+    // stay upright: body up follows local up (keeps yaw)
+    const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
+    this.quat.premultiply(_q.setFromUnitVectors(bodyUp, up)).normalize();
+    this.angVel.set(0, 0, 0);
+    // desired ground velocity
+    const tgt = _w3.set(0, 0, 0);
+    if (this.walkTarget) tgt.copy(this.walkTarget);
+    else {
+      const f = this.forward(_v).addScaledVector(up, -this.forward(_v2).dot(up)).normalize();
+      const r = _v2.crossVectors(f, up).normalize();
+      tgt.addScaledVector(r, this.ctrl.move.x).addScaledVector(f, -this.ctrl.move.z);
+      if (tgt.lengthSq() > 1) tgt.normalize();
+      tgt.multiplyScalar(5.2);
+    }
+    tgt.addScaledVector(up, -tgt.dot(up));
+    if (tgt.length() > 6) tgt.setLength(6);
+    const vt = _v.copy(this.vel).addScaledVector(up, -this.vel.dot(up));
+    vt.lerp(tgt, Math.min(1, dt * 10));
+    let vn = this.vel.dot(up);
+    // jump
+    const jump = this.walkTarget ? this.walkJump : this.ctrl.move.y > 0.5;
+    if (jump && this.jumpGrace <= 0) { vn = 5; this.walkJump = false; }
+    this.vel.copy(vt).addScaledVector(up, vn);
+    if (vn > 1.5) { this.pos.addScaledVector(this.vel, dt); this.leaveWalk(); return; }
+    // stand at hip height on the floor
+    const hgt = 1.05;
+    this.pos.addScaledVector(vt, dt).addScaledVector(h.n, (hgt - h.t) * Math.min(1, dt * 20));
+    this.vel.addScaledVector(up, -this.vel.dot(up));
+    world.sphereContacts(this.pos, BODY_R, (n, depth) => {
+      if (n.dot(up) > 0.7) return; // the floor is handled by the stance spring
+      this.pos.addScaledVector(n, depth);
+      const vn2 = this.vel.dot(n);
+      if (vn2 < 0) this.vel.addScaledVector(n, -vn2);
+    });
   }
 
   /** Hand-over-hand crawl along a grabbed surface (no gas). Wraps around edges; lets go past the end of a surface. */
@@ -503,6 +605,7 @@ export class Soldier {
     this.spawnProtect -= dt;
     this.grenadeCool -= dt; this.meleeCool -= dt;
     this.meleeT = Math.max(0, this.meleeT - dt);
+    this.jumpGrace = Math.max(0, this.jumpGrace - dt);
     this.adsAmt += ((this.ads && !this.grab ? 1 : 0) - this.adsAmt) * Math.min(1, dt * 9);
     if (this.throwT > 0) {
       const before = this.throwT;
@@ -616,5 +719,6 @@ export class Soldier {
 const _cmdR = new THREE.Vector3(), _cmdT = new THREE.Vector3(), _wDes = new THREE.Vector3(), _zero = new THREE.Vector3();
 const _F = new THREE.Vector3(), _T = new THREE.Vector3(), _f = new THREE.Vector3(), _Fw = new THREE.Vector3(), _Tb = new THREE.Vector3();
 const _I = new THREE.Vector3(), _q2 = new THREE.Quaternion();
+const _g1 = new THREE.Vector3(), _w1 = new THREE.Vector3(), _w2 = new THREE.Vector3(), _w3 = new THREE.Vector3();
 const _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
 const _AX = new THREE.Vector3(1, 0, 0), _AY = new THREE.Vector3(0, 1, 0);

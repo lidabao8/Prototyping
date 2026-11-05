@@ -459,7 +459,7 @@ export class HUD {
 
   drawCollision(cx, cy, dt) {
     const game = this.game, p = game.player;
-    if (p.grab) return;
+    if (p.grab || p.walking) return;
     const sp = p.vel.length();
     if (sp < 1.5) return;
     const dir = _v.copy(p.vel).divideScalar(sp);
@@ -517,8 +517,12 @@ export class HUD {
     this.spaced(`${Math.ceil(p.o2)}%`, hx + 150, y + 72, 11, p.o2 < 30 ? DANGER : '#c9d3dc', 'right', 700, 1);
     if (p.leaks.length) this.spaced(`BREACH ×${p.leaks.length}`, hx, y + 90, 10, (game.time * 3) % 1 < 0.6 ? DANGER : WARN, 'left', 700, 2);
     else {
-      const st = p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
-      this.spaced(st, hx, y + 90, 10, p.grab ? OK : 'rgba(159,232,255,0.75)', 'left', 700, 2);
+      const st = p.walking ? 'WALKING · RCS OFF' : p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
+      this.spaced(st, hx, y + 90, 10, p.grab || p.walking ? OK : 'rgba(159,232,255,0.75)', 'left', 700, 2);
+      if (game.world.omega) {
+        const gl = game.world.gravityAt(p.pos, _v).length() / 9.81;
+        this.spaced(`${gl.toFixed(2)} g`, hx + 150, y + 90, 10, '#9fe8ff', 'right', 700, 1.5);
+      }
     }
     // RCS mode chip above the cluster
     const mode = `RCS · ${MODES[p.mode]}`;

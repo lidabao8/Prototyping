@@ -33,6 +33,7 @@ const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLim
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
 const MAP_WEIGHTS = {
+  spin: { rifle: 1.0, shotgun: 0.8, gyrojet: 0.7, recoilless: 0.75, maser: 0.9 },
   hangar: { rifle: 1.0, shotgun: 0.95, gyrojet: 0.5, recoilless: 0.6, maser: 0.85 },
   yard: { rifle: 1.0, shotgun: 0.3, gyrojet: 0.95, recoilless: 0.85, maser: 0.9 },
 };
@@ -298,7 +299,8 @@ class Game {
       b.type = 'button'; b.setAttribute('role', 'radio');
       const d = describe && describe(o.value);
       if (d) b.innerHTML = `<b>${o.textContent}</b><span>${d}</span>`; else b.textContent = o.textContent;
-      if (kind === 'map') b.style.backgroundImage = o.value === 'yard'
+      if (kind === 'map' && o.value === 'spin') b.style.backgroundImage = 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), radial-gradient(circle at 50% 50%, transparent 0 34%, rgba(159,232,255,0.25) 35% 37%, transparent 38% 60%, rgba(159,232,255,0.12) 61% 63%, transparent 64%), linear-gradient(135deg, #141c26, #0b1018)';
+      else if (kind === 'map') b.style.backgroundImage = o.value === 'yard'
         ? 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), radial-gradient(circle at 75% 120%, #3b6fb0 0 30%, transparent 31%), radial-gradient(1px 1px at 20% 30%, #fff, transparent), radial-gradient(1px 1px at 60% 20%, #fff, transparent), radial-gradient(1px 1px at 40% 60%, #cde, transparent), linear-gradient(135deg, #070b14, #0c1424)'
         : 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), repeating-linear-gradient(90deg, rgba(159,232,255,0.08) 0 2px, transparent 2px 38px), repeating-linear-gradient(0deg, rgba(159,232,255,0.06) 0 2px, transparent 2px 38px), linear-gradient(135deg, #1a2430, #0d141c)';
       b.addEventListener('click', () => { sel.value = o.value; sel.dispatchEvent(new Event('change')); refresh(); });
@@ -800,6 +802,7 @@ class Game {
   tryGrab(s) {
     const surf = this.world.nearestSurface(s.pos, BODY_R + 0.85);
     if (!surf) return false;
+    if (s.walking) s.leaveWalk();
     const ref = surf.kind === 'pod' ? surf.obj.vel : _v.set(0, 0, 0);
     const rel = _v2.subVectors(s.vel, ref).length();
     if (rel > 4.5) { if (s.isPlayer) { this.hud.message('TOO FAST TO GRAB', '#ff4b3a', 1.2); } return false; }
@@ -979,6 +982,8 @@ class Game {
     }
     if (this.state === 'ending') this.tickEnding(dt);
     this.world.updateBarriers(this.time);
+    // the stars wheel past the windows of a spinning station (we live in its rotating frame)
+    if (this.world.omega && this.world.space) this.world.space.rotation.x = -this.world.omega * this.time;
     if (this.state !== 'paused') { this.fx.update(dt, this.combat.tracerList()); this.combat.syncMeshes(dt); }
     this.world.syncPodMeshes();
     for (const s of this.soldiers) s.syncModel(dt);

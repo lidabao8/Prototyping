@@ -6,6 +6,7 @@ const HX = 72, HY = 36, HZ = 36;
 
 export const MAPS = {
   hangar: { name: 'Hangar Bay', desc: 'Enclosed 144 m hangar. Walls everywhere to push off.', enclosed: true, bounds: [72, 36, 36], navStep: [6, 7.5], navR: 10.5, spawnX: 64 },
+  spin: { name: 'Spin Drum', desc: 'Rotating drum station: 0.5 g on the rim, zero-g at the axis. Walk the floor, fly the core.', enclosed: true, drum: 36, omega: 0.3727, bounds: [70, 36, 36], navStep: [6, 7], navR: 10.5, spawnX: 64 },
   yard: { name: 'Derelict Yard', desc: 'Open orbit, 300 m across. No walls: drift too far and your suit runs out of luck.', enclosed: false, bounds: [150, 70, 70], navStep: [11, 11], navR: 19.5, spawnX: 124 },
 };
 
@@ -150,6 +151,8 @@ export class World {
     this.mapId = MAPS[mapId] ? mapId : 'hangar';
     this.def = MAPS[this.mapId];
     this.enclosed = this.def.enclosed;
+    this.drum = this.def.drum || 0;          // radius of a spinning drum hull (axis = x), 0 if none
+    this.omega = this.def.omega || 0;        // spin rate (rad/s): centrifugal + Coriolis in the rotating frame
     const B = this.def.bounds;
     this.bounds = { min: [-B[0], -B[1], -B[2]], max: [B[0], B[1], B[2]] };
     this.boxes = [];
@@ -177,7 +180,8 @@ export class World {
       glyphB: new THREE.MeshBasicMaterial({ color: 0x1d4a8a }),
       glyphO: new THREE.MeshBasicMaterial({ color: 0x8a4a16 }),
     };
-    if (this.enclosed) { this.buildHull(); this.buildInterior(); }
+    if (this.drum) this.buildDrum();
+    else if (this.enclosed) { this.buildHull(); this.buildInterior(); }
     else this.buildYard();
     this.buildSpace();
     this.buildPods();
@@ -187,10 +191,124 @@ export class World {
     this.pickupSpots = this.makePickupSpots();
   }
 
+  // ---------- Rotating frame ----------
+  /** Centrifugal acceleration (outward from the spin axis), zero on non-spinning maps. */
+  gravityAt(p, out) {
+    if (!this.omega) return out.set(0, 0, 0);
+    const w2 = this.omega * this.omega;
+    return out.set(0, p.y * w2, p.z * w2);
+  }
+
+  /** Coriolis acceleration -2 Ω×v for spin about +x. */
+  coriolis(v, out) {
+    if (!this.omega) return out.set(0, 0, 0);
+    return out.set(0, 2 * this.omega * v.z, -2 * this.omega * v.y);
+  }
+
+  /** "Up" on the drum floor: toward the axis. */
+  upAt(p, out) {
+    const r = Math.hypot(p.y, p.z);
+    return r > 1e-6 ? out.set(0, -p.y / r, -p.z / r) : out.set(0, 1, 0);
+  }
+
+  buildDrum() {
+    const M = this.mats, R = this.drum, HXd = this.def.bounds[0];
+    // shell: three panel bands with two window bands between them (stars wheel past outside)
+    const shell = (x0, x1, mat, glass = false) => {
+      const g = new THREE.CylinderGeometry(R, R, x1 - x0, 72, 1, true);
+      g.rotateZ(Math.PI / 2);
+      const uv = g.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (2 * Math.PI * R) / 8, uv.getY(i) * (x1 - x0) / 8);
+      const m = new THREE.Mesh(g, glass ? new THREE.MeshBasicMaterial({ color: 0x88aacc, transparent: true, opacity: 0.06, side: THREE.BackSide, depthWrite: false }) : mat);
+      if (!glass) { m.material = mat.clone(); m.material.side = THREE.BackSide; m.receiveShadow = true; }
+      m.position.x = (x0 + x1) / 2;
+      this.group.add(m);
+    };
+    shell(-HXd, -34, M.deck); shell(-34, -26, null, true); shell(-26, 26, M.deck); shell(26, 34, null, true); shell(34, HXd, M.deck);
+    for (const x of [-34, -26, 26, 34]) { const r = new THREE.Mesh(new THREE.TorusGeometry(R - 0.2, 0.35, 8, 96), M.steel); r.rotation.y = Math.PI / 2; r.position.x = x; this.group.add(r); }
+    for (const x of [-56, -45, -12, 0, 12, 45, 56]) { const r = new THREE.Mesh(new THREE.TorusGeometry(R - 0.1, 0.18, 6, 96), M.steel); r.rotation.y = Math.PI / 2; r.position.x = x; this.group.add(r); }
+    // end caps (team colours)
+    for (const s of [-1, 1]) {
+      const cap = new THREE.Mesh(new THREE.CircleGeometry(R, 72), (s < 0 ? M.hullBlue : M.hullOrange).clone());
+      cap.material.side = THREE.DoubleSide;
+      cap.rotation.y = s < 0 ? Math.PI / 2 : -Math.PI / 2; cap.position.x = s * HXd; cap.receiveShadow = true;
+      this.group.add(cap);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(R * 0.6, 0.25, 6, 64), s < 0 ? M.stripB : M.stripO);
+      ring.rotation.y = Math.PI / 2; ring.position.x = s * (HXd - 0.2); this.group.add(ring);
+    }
+    // light strips along the floor in the four cardinal "streets"
+    for (let k = 0; k < 8; k++) {
+      const a = k / 8 * Math.PI * 2;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(2 * HXd - 10, 0.08, 0.25), k % 2 ? M.stripW : (k < 4 ? M.stripB : M.stripO));
+      m.position.set(0, Math.cos(a) * (R - 0.05), Math.sin(a) * (R - 0.05));
+      m.rotation.x = a;
+      this.group.add(m);
+    }
+    // ---- floor cover in the four cardinal streets (axis-aligned boxes standing on the rim) ----
+    const floorBox = (dir, x0, x1, lat, w, h, mat) => {
+      // dir: 0 = -y floor, 1 = +y, 2 = -z, 3 = +z (floor point at that cardinal)
+      const ax = dir < 2 ? 1 : 2, s = dir % 2 === 0 ? -1 : 1, lax = ax === 1 ? 2 : 1;
+      const min = [x0, 0, 0], max = [x1, 0, 0];
+      const floor = s * R, inner = s * (R - h);
+      min[ax] = Math.min(floor + s * 1.5, inner); max[ax] = Math.max(floor + s * 1.5, inner);
+      min[lax] = lat - w / 2; max[lax] = lat + w / 2;
+      this.addBox(min, max, mat, { tile: 3 });
+    };
+    const C = [M.cRed, M.cTeal, M.cYel, M.cGrey];
+    for (let dir = 0; dir < 4; dir++) {
+      for (const sx of [-1, 1]) {
+        const X = (a, b) => (sx > 0 ? [a, b] : [-b, -a]);
+        floorBox(dir, ...X(10, 11), 0, 7, 1.5, M.steel);           // low wall across the street
+        floorBox(dir, ...X(18, 20.5), 5, 2.5, 2.5, C[dir]);        // crate
+        floorBox(dir, ...X(19, 21.5), -6, 2.5, 2.5, C[(dir + 1) % 4]);
+        floorBox(dir, ...X(30, 31), (dir % 2 ? 4 : -4), 6, 1.6, M.steel);
+        floorBox(dir, ...X(38, 48), (dir % 2 ? -5 : 5), 7, 5, M.hull);   // two-storey block
+        floorBox(dir, ...X(50, 51.2), 0, 10, 2.2, M.steel);
+      }
+    }
+    // ---- zero-g core: hub, spokes, floating platforms ----
+    this.addBox([-5, -4, -4], [5, 4, 4], M.hull, { tile: 4 });
+    this.addBox([-1, -1, -1], [1, 1, 1], null);
+    for (const x of [-24, 24]) {
+      this.addBox([x - 0.6, 4, -0.6], [x + 0.6, R + 1, 0.6], M.girder, { tile: 2 });
+      this.addBox([x - 0.6, -R - 1, -0.6], [x + 0.6, -4, 0.6], M.girder, { tile: 2 });
+      this.addBox([x - 0.6, -0.6, 4], [x + 0.6, 0.6, R + 1], M.girder, { tile: 2 });
+      this.addBox([x - 0.6, -0.6, -R - 1], [x + 0.6, 0.6, -4], M.girder, { tile: 2 });
+      this.addBox([x - 3, -3, -3], [x + 3, 3, 3], M.steel, { tile: 3 });
+    }
+    this.addBox([-1.2, -1.2, -1.2], [1.2, 1.2, 1.2], null);
+    // axial truss through the core
+    this.addMirrored([5, -0.5, -0.5], [21, 0.5, 0.5], M.girder, M.girder, { tile: 2 });
+    this.addMirrored([27, -0.5, -0.5], [44, 0.5, 0.5], M.girder, M.girder, { tile: 2 });
+    // floating platforms (low gravity decks facing the axis) and cover plates near the centre
+    this.addMirrored([6, -11.4, -5], [16, -11, 5], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([6, 11, -5], [16, 11.4, 5], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([30, -5, -12.4], [40, 5, -12], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([30, -5, 12], [40, 5, 12.4], M.steel, M.steel, { tile: 3 });
+    this.addMirrored([12, 5, 7], [14.6, 7.6, 9.6], M.cYel, M.cTeal, { tile: 3 });
+    this.addMirrored([34, -9, -8], [36.6, -6.4, -5.4], M.cRed, M.cGrey, { tile: 3 });
+    // spawn bulkheads at the caps (rings with openings)
+    for (const sx of [-1, 1]) {
+      const X = sx > 0 ? [55, 56.6] : [-56.6, -55];
+      for (let k = 0; k < 8; k++) {
+        const a = (k + 0.5) / 8 * Math.PI * 2;
+        const c = Math.cos(a) * 26, d = Math.sin(a) * 26;
+        this.addBox([X[0], c - 4, d - 4], [X[1], c + 4, d + 4], sx > 0 ? M.hullOrange : M.hullBlue, { tile: 3 });
+      }
+    }
+    // lighting: soft fill, axial lamps, team glows
+    this.group.add(new THREE.HemisphereLight(0xc8d8ff, 0x3a3630, 1.0));
+    const sun = new THREE.DirectionalLight(0xfff0dd, 1.6); sun.position.set(0.3, 1, 0.4); this.group.add(sun);
+    this.sun = sun;
+    for (const x of [-40, 0, 40]) { const l = new THREE.PointLight(0xe8f0ff, 70, 70, 1); l.position.set(x, 0, 0); this.group.add(l); }
+    const lb = new THREE.PointLight(0x3f8cff, 30, 40, 1); lb.position.set(-62, 0, 0); this.group.add(lb);
+    const lo = new THREE.PointLight(0xff8a2a, 30, 40, 1); lo.position.set(62, 0, 0); this.group.add(lo);
+  }
+
   // ---------- Spawn shields ----------
   /** Plane |x| = barrierX closes off each team's spawn bay: blue at -x, orange at +x. */
   buildBarriers() {
-    this.barrierX = this.enclosed ? 55.8 : 112;
+    this.barrierX = this.drum ? 55.8 : this.enclosed ? 55.8 : 112;
     const B = this.def.bounds;
     this.barriers = [];
     for (const team of [0, 1]) {
@@ -210,7 +328,7 @@ export class World {
             gl_FragColor = vec4(color*1.6, a);
           }`,
       });
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(2 * B[2], 2 * B[1]), mat);
+      const m = new THREE.Mesh(this.drum ? new THREE.CircleGeometry(this.drum, 64) : new THREE.PlaneGeometry(2 * B[2], 2 * B[1]), mat);
       m.rotation.y = Math.PI / 2;
       m.position.set((team === 0 ? -1 : 1) * this.barrierX, 0, 0);
       m.renderOrder = 5;
@@ -236,12 +354,14 @@ export class World {
   // ---------- Ammo depots ----------
   makePickupSpots() {
     const k = this.def.bounds[0] / 72, ky = this.def.bounds[1] / 36;
-    const half = this.enclosed
+    const half = this.drum
+      ? [[24, 0, -9], [15, -33, 0], [42, 0, 33]]
+      : this.enclosed
       ? [[30, 18, 2], [12, -16, 26], [40, -6, -22]]
       : [[60, 12, 14], [40, 30, -30], [90, -22, 24]];
     const pts = [];
     for (const [x, y, z] of half) { pts.push([x, y, z], [-x, -y, -z]); }
-    pts.push(this.enclosed ? [0, 26, -14] : [0, 40, 12], this.enclosed ? [0, -26, 14] : [0, -40, -12]);
+    pts.push(this.drum ? [0, 0, 9] : this.enclosed ? [0, 26, -14] : [0, 40, 12], this.drum ? [0, 33, 0] : this.enclosed ? [0, -26, 14] : [0, -40, -12]);
     void k; void ky;
     return pts.map(([x, y, z]) => {
       const i = this.nearestNode(new THREE.Vector3(x, y, z), false);
@@ -405,6 +525,8 @@ export class World {
   }
 
   buildSpace() {
+    this.space = new THREE.Group();
+    this.group.add(this.space);
     // stars
     const N = 3000, pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
     const v = new THREE.Vector3();
@@ -417,14 +539,14 @@ export class World {
     const sg = new THREE.BufferGeometry();
     sg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     sg.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    this.group.add(new THREE.Points(sg, new THREE.PointsMaterial({ size: 2.2, sizeAttenuation: false, vertexColors: true, fog: false })));
+    this.space.add(new THREE.Points(sg, new THREE.PointsMaterial({ size: 2.2, sizeAttenuation: false, vertexColors: true, fog: false })));
     // planet beyond +z window
     const planet = new THREE.Mesh(new THREE.SphereGeometry(900, 64, 32),
       new THREE.MeshStandardMaterial({ map: planetTexture(), roughness: 1, metalness: 0 }));
     if (this.enclosed) planet.position.set(250, -620, 1700);
     else { planet.position.set(300, -1500, 900); planet.scale.setScalar(1.4); }
     planet.rotation.z = 0.3;
-    this.group.add(planet);
+    this.space.add(planet);
     this.planet = planet;
     const atmo = new THREE.Mesh(new THREE.SphereGeometry(935, 64, 32), new THREE.ShaderMaterial({
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -432,7 +554,7 @@ export class World {
       vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix*vec4(position,1.); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }',
       fragmentShader: 'varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0-abs(dot(vN,vV)),3.0); gl_FragColor = vec4(0.35,0.6,1.0,1.0)*f*1.4; }',
     }));
-    atmo.position.copy(planet.position); atmo.scale.copy(planet.scale); this.group.add(atmo);
+    atmo.position.copy(planet.position); atmo.scale.copy(planet.scale); this.space.add(atmo);
     // sun disc beyond -z window
     const sunTex = (() => {
       const c = document.createElement('canvas'); c.width = c.height = 128;
@@ -444,12 +566,12 @@ export class World {
     })();
     const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, blending: THREE.AdditiveBlending, depthWrite: false }));
     sunSpr.position.set(-600, 300, -2500); sunSpr.scale.set(500, 500, 1);
-    this.group.add(sunSpr);
+    this.space.add(sunSpr);
   }
 
   buildPods() {
     const proto = buildPod();
-    const places = this.enclosed
+    const places = this.drum ? [] : this.enclosed
       ? [[8, 14, 12], [-8, -14, -12], [30, 0, -24], [-30, 0, 24], [50, 26, 10], [-50, -26, -10], [0, 28, 20], [0, -28, -20]]
       : [[20, 30, 20], [-20, -30, -20], [60, -15, 35], [-60, 15, -35], [95, 25, 10], [-95, -25, -10], [40, 40, -40], [-40, -40, 40], [0, 35, -30], [0, -35, 30], [75, -45, -30], [-75, 45, 30]];
     places.forEach((p, i) => {
@@ -551,7 +673,19 @@ export class World {
     }
     // hull (inside of the bounds box)
     const oa = [o.x, o.y, o.z], da = [d.x, d.y, d.z];
-    if (this.enclosed) for (let i = 0; i < 3; i++) {
+    if (this.drum) {
+      // inside of the drum: exit through the cylinder wall
+      const a = d.y * d.y + d.z * d.z;
+      if (a > 1e-12) {
+        const b = 2 * (o.y * d.y + o.z * d.z), c = o.y * o.y + o.z * o.z - this.drum * this.drum;
+        const disc = b * b - 4 * a * c;
+        if (disc >= 0) {
+          const t = (-b + Math.sqrt(disc)) / (2 * a);
+          if (t >= 0 && t < best) { best = t; kind = 'wall'; obj = null; hit.n.set(0, -(o.y + d.y * t), -(o.z + d.z * t)).normalize(); }
+        }
+      }
+    }
+    if (this.enclosed) for (let i = 0; i < (this.drum ? 1 : 3); i++) {
       if (Math.abs(da[i]) < 1e-12) continue;
       const lim = da[i] > 0 ? this.bounds.max[i] : this.bounds.min[i];
       const t = (lim - oa[i]) / da[i];
@@ -572,6 +706,10 @@ export class World {
       const lo = this.bounds.min[i] + r, hi = this.bounds.max[i] - r;
       const av = a.getComponent(i), bv = b.getComponent(i);
       if (av < lo || av > hi || bv < lo || bv > hi) return false;
+    }
+    if (this.drum) { // the drum is convex: both ends inside means the whole segment is
+      const R2 = (this.drum - r) * (this.drum - r);
+      if (a.y * a.y + a.z * a.z > R2 || b.y * b.y + b.z * b.z > R2) return false;
     }
     const sx0 = Math.min(a.x, b.x) - r, sx1 = Math.max(a.x, b.x) + r, sy0 = Math.min(a.y, b.y) - r, sy1 = Math.max(a.y, b.y) + r, sz0 = Math.min(a.z, b.z) - r, sz1 = Math.max(a.z, b.z) + r;
     const eb = { min: [0, 0, 0], max: [0, 0, 0] };
@@ -597,7 +735,8 @@ export class World {
 
   /** Distance from p to nearest static surface (incl. hull). */
   clearance(p) {
-    let best = this.enclosed ? Math.min(p.x - this.bounds.min[0], this.bounds.max[0] - p.x, p.y - this.bounds.min[1], this.bounds.max[1] - p.y, p.z - this.bounds.min[2], this.bounds.max[2] - p.z) : 1e9;
+    let best = this.drum ? Math.min(p.x - this.bounds.min[0], this.bounds.max[0] - p.x, this.drum - Math.hypot(p.y, p.z))
+      : this.enclosed ? Math.min(p.x - this.bounds.min[0], this.bounds.max[0] - p.x, p.y - this.bounds.min[1], this.bounds.max[1] - p.y, p.z - this.bounds.min[2], this.bounds.max[2] - p.z) : 1e9;
     const c = new THREE.Vector3();
     for (const b of this.boxes) {
       closestOnBox(p, b, c);
@@ -617,7 +756,11 @@ export class World {
    */
   sphereContacts(p, r, cb) {
     const c = new THREE.Vector3(), n = new THREE.Vector3();
-    if (this.enclosed) for (let i = 0; i < 3; i++) {
+    if (this.drum) {
+      const rr = Math.hypot(p.y, p.z), lim = this.drum - r;
+      if (rr > lim && rr > 1e-6) { n.set(0, -p.y / rr, -p.z / rr); cb(n, rr - lim, 'wall', null); }
+    }
+    if (this.enclosed) for (let i = 0; i < (this.drum ? 1 : 3); i++) {
       const lo = this.bounds.min[i] + r, hi = this.bounds.max[i] - r;
       const v = p.getComponent(i);
       if (v < lo) { n.set(0, 0, 0).setComponent(i, 1); cb(n, lo - v, 'wall', null); }
@@ -655,7 +798,11 @@ export class World {
   nearestSurface(p, range) {
     let best = null, bestD = range;
     const c = new THREE.Vector3();
-    if (this.enclosed) for (let i = 0; i < 3; i++) {
+    if (this.drum) {
+      const rr = Math.hypot(p.y, p.z), d = this.drum - rr;
+      if (d < bestD && rr > 1e-6) { bestD = d; best = { point: new THREE.Vector3(p.x, p.y / rr * this.drum, p.z / rr * this.drum), normal: new THREE.Vector3(0, -p.y / rr, -p.z / rr), kind: 'wall', obj: null }; }
+    }
+    if (this.enclosed) for (let i = 0; i < (this.drum ? 1 : 3); i++) {
       for (const s of [-1, 1]) {
         const lim = s > 0 ? this.bounds.max[i] : this.bounds.min[i];
         const d = Math.abs(lim - p.getComponent(i));
@@ -768,8 +915,16 @@ export class World {
         }
       }
     }
+    // drum floor: standing positions all around the rim
+    if (this.drum) {
+      for (let x = -this.bounds.max[0] + 6; x < this.bounds.max[0] - 3; x += 7) for (let k = 0; k < 28; k++) {
+        const a = k / 28 * Math.PI * 2, n = new THREE.Vector3(0, -Math.cos(a), -Math.sin(a));
+        tmp.set(x, Math.cos(a) * (this.drum - off), Math.sin(a) * (this.drum - off));
+        addSurf(tmp, n);
+      }
+    }
     // hull surface nodes
-    if (this.enclosed) for (let ax = 0; ax < 3; ax++) for (const s of [-1, 1]) {
+    if (this.enclosed) for (let ax = 0; ax < (this.drum ? 1 : 3); ax++) for (const s of [-1, 1]) {
       const u = (ax + 1) % 3, v = (ax + 2) % 3;
       const n = new THREE.Vector3().setComponent(ax, -s);
       const step = 10;

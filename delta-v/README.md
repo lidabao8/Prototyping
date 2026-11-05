@@ -1,6 +1,20 @@
 # DELTA-V — zero-g team deathmatch
 
-Two squads of EVA soldiers fight in orbit, on one of two maps: **Hangar Bay**, an enclosed 144 m hall, or **Derelict Yard**, an open 300 m field of station modules, trusses, container clusters and asteroids. On Derelict Yard there are no walls, so you're warned when you leave the combat area and your suit starts failing after 5 s outside it. There is no "up", and nothing gives you momentum for free: every burn, shot, push-off and suit leak changes your trajectory.
+Two squads of EVA soldiers fight in orbit, on one of three maps:
+
+* **Hangar Bay:** an enclosed 144 m hall.
+* **Spin Drum:** a rotating station with centrifugal gravity.
+* **Derelict Yard:** an open 300 m field of station modules, trusses, container clusters and asteroids. There are no walls, so you're warned when you leave the combat area, and your suit starts failing after 5 s outside it.
+
+### Spin Drum
+
+The station is a 72 m-diameter, 140 m-long drum spinning about its long axis at Ω ≈ 0.37 rad/s. The game runs in the drum's rotating frame, so the station stands still and the stars wheel past two window bands.
+
+* **Gravity:** centrifugal acceleration Ω²r points outward from the axis. It's about 0.5 g on the rim and fades to zero at the centre.
+* **Floating:** RCS works as everywhere else, but you also feel the centrifugal pull and Coriolis drift (−2Ω×v). A slow fall curves sideways, and grenades arc. Bullets fly straight, as a gameplay simplification.
+* **Landing:** touch the floor feet-down and you switch to normal walking: WASD, Space to jump, mouse look with head pitch, and the RCS shuts off. Legs absorb landings up to 11 m/s. Falling all the way from the axis lands at about 13 m/s, so brake on the way down. Landing on your back or head just bounces you.
+* **Layout:** cover stands on the floor in four streets around the drum (low walls, crates, two-storey blocks). The zero-g core has a central hub, spokes, an axial truss, floating low-gravity platforms and crates.
+* **Bots:** they walk the floor (jumping when their path climbs) and fly the core, cancelling the spin forces with their jets as far as thrust allows. There is no "up", and nothing gives you momentum for free: every burn, shot, push-off and suit leak changes your trajectory.
 
 Open `index.html` in a browser. It is a prebuilt bundle (`dist/delta-v.js`), so no server or build is needed. To rebuild after editing `src/`:
 

@@ -458,7 +458,7 @@ export class Bot {
         vDes.multiplyScalar(0.3);
         // reached: anchor on surface nodes
         const nd = this.goalNode >= 0 ? w.nav[this.goalNode] : null;
-        if (nd && nd.surf && s.vel.length() < 3.8) { if (g.tryGrab(s)) { this.coast = false; return; } }
+        if (nd && nd.surf && !s.walking && !(w.omega && nd.normal && w.upAt(nd.pos, _v3).dot(nd.normal) > 0.7) && s.vel.length() < 3.8) { if (g.tryGrab(s)) { this.coast = false; return; } }
         if (d < 1.0 && this.state !== 'engage') { this.goal = null; this.path = null; }
       }
     }
@@ -506,10 +506,19 @@ export class Bot {
     }
     // stand still if nothing to do
     if (!wp && !this.jink.lengthSq()) vDes.set(0, 0, 0);
+    // on a gravity floor: legs, not thrusters
+    if (s.walking) {
+      s.walkTarget = (s.walkTarget || new THREE.Vector3()).copy(vDes);
+      s.walkJump = vDes.dot(w.upAt(s.pos, _v3)) > 2.2;
+      return;
+    }
+    s.walkTarget = null;
     // velocity controller with deadband (coasting saves gas)
     const aCmd = _v.subVectors(vDes, s.vel).multiplyScalar(1.6);
     const dead = this.coast ? 0.6 : this.state === 'engage' ? 0.18 : 0.3;
     if (aCmd.length() < dead) aCmd.set(0, 0, 0); else this.coast = false;
+    // spinning station: cancel centrifugal pull and Coriolis drift (as far as the jets allow)
+    if (w.omega) aCmd.sub(w.gravityAt(s.pos, _v3)).sub(w.coriolis(s.vel, _v3));
     if (s.gas < 0.05) aCmd.set(0, 0, 0); // dry tank: nothing to command
     const aAxis = 4 * NOZZLE_F / s.mass;
     aCmd.applyQuaternion(_q.copy(s.quat).invert()).divideScalar(aAxis);
