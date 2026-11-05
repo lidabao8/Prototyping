@@ -192,6 +192,7 @@ export class HUD {
       this.drawDeath(cx, cy);
     }
     this.drawMessages(cx, dt);
+    if (game.state === 'ending') this.drawEnding(cx, cy);
   }
 
   drawScore() {
@@ -206,8 +207,9 @@ export class HUD {
       g.fillStyle = col; g.globalAlpha = 0.85;
       g.fillRect(dir < 0 ? x : x + 116, y, 4, h);
       g.globalAlpha = 1;
-      this.num(String(sc[team]), dir < 0 ? x + 104 : x + 16, y + h / 2 + 1, 24, col, dir < 0 ? 'right' : 'left');
-      this.spaced(TEAM_NAMES[team], dir < 0 ? x + 14 : x + 106, y + h / 2 + 1, 10, 'rgba(233,238,242,0.7)', dir < 0 ? 'left' : 'right', 700, 3);
+      // label in the outer corner, score toward the timer
+      this.spaced(TEAM_NAMES[team], dir < 0 ? x + 12 : x + 108, y + 12, 8, 'rgba(233,238,242,0.65)', dir < 0 ? 'left' : 'right', 700, 3);
+      this.num(String(sc[team]), dir < 0 ? x + 106 : x + 14, y + 25, 22, col, dir < 0 ? 'right' : 'left');
       // progress to the score limit
       const f = clamp(sc[team] / lim, 0, 1);
       g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(x, y + h + 4, 120, 3);
@@ -485,7 +487,7 @@ export class HUD {
 
   drawStatus() {
     const g = this.g, p = this.game.player, H = this.H, game = this.game;
-    const x = 22, y = H - 128, w = 330, h = 106;
+    const x = 22, y = H - 128, w = 420, h = 106;
     this.plate(x, y, w, h, 12);
     // delta-v ring gauge
     const gx = x + 52, gy = y + 54, r = 34, frac = p.gas / GAS_MAX;
@@ -533,30 +535,97 @@ export class HUD {
   }
 
   drawSuit() {
-    // suit integrity diagram: torso + 4 thruster quads, nozzle activity, leaks
-    const g = this.g, p = this.game.player;
-    const ox = 316, oy = this.H - 70, s = 44;
-    this.spaced('SUIT', ox, oy - 48, 9, '#8996a1', 'center', 700, 3);
-    g.strokeStyle = 'rgba(159,232,255,0.5)'; g.lineWidth = 1.5;
-    g.strokeRect(ox - 14, oy - 30, 28, 40);
-    g.beginPath(); g.arc(ox, oy - 40, 9, 0, Math.PI * 2); g.stroke();
-    g.beginPath(); g.moveTo(ox - 8, oy + 10); g.lineTo(ox - 10, oy + 42); g.moveTo(ox + 8, oy + 10); g.lineTo(ox + 10, oy + 42); g.stroke();
-    TOWERS.forEach((t, i) => {
+    // suit & RCS schematic (front view): silhouette, four thruster quads with all six nozzles, leaks
+    const g = this.g, p = this.game.player, t = this.game.time;
+    const ox = 372, oy = this.H - 74, k = 46;
+    const P = (x, y) => [ox + x * k, oy - y * k];
+    const line = 'rgba(159,232,255,0.55)', faint = 'rgba(159,232,255,0.18)';
+    g.lineWidth = 1.2;
+    // life-support pack behind the torso
+    g.strokeStyle = faint; g.setLineDash([3, 3]);
+    let [x, y] = P(-0.3, 0.5); g.strokeRect(x, y, 0.6 * k, 0.75 * k);
+    g.setLineDash([]);
+    // torso, collar, belt
+    g.strokeStyle = line; g.fillStyle = 'rgba(159,232,255,0.06)';
+    [x, y] = P(-0.25, 0.46); g.beginPath(); g.roundRect ? g.roundRect(x, y, 0.5 * k, 0.62 * k, 6) : g.rect(x, y, 0.5 * k, 0.62 * k); g.fill(); g.stroke();
+    [x, y] = P(-0.26, -0.08); g.strokeRect(x, y, 0.52 * k, 0.1 * k);
+    // helmet with visor
+    [x, y] = P(0, 0.62); g.beginPath(); g.arc(x, y, 0.2 * k, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = 'rgba(255,204,77,0.25)'; g.beginPath(); g.ellipse(x, y + 1, 0.14 * k, 0.09 * k, 0, 0, Math.PI * 2); g.fill();
+    // arms and legs
+    g.strokeStyle = line; g.lineWidth = 3; g.lineCap = 'round';
+    const seg = (a, b) => { const [x1, y1] = P(a[0], a[1]); const [x2, y2] = P(b[0], b[1]); g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); };
+    seg([-0.29, 0.4], [-0.36, 0.08]); seg([-0.36, 0.08], [-0.3, -0.18]);
+    seg([0.29, 0.4], [0.36, 0.08]); seg([0.36, 0.08], [0.3, -0.18]);
+    seg([-0.14, -0.2], [-0.16, -0.62]); seg([-0.16, -0.62], [-0.14, -0.98]);
+    seg([0.14, -0.2], [0.16, -0.62]); seg([0.16, -0.62], [0.14, -0.98]);
+    g.lineWidth = 1.2; g.lineCap = 'butt';
+    // thruster quads
+    let hpSum = 0, thrSum = 0;
+    TOWERS.forEach((tw, i) => {
       const st = p.towers[i];
-      const x = ox + t.pos.x * s * 1.6, y = oy - 10 - t.pos.y * s * 0.9;
+      hpSum += st.hp;
+      const [cx, cy] = P(tw.pos.x * 1.25, tw.pos.y * 0.95);
       const f = st.hp / 30;
-      const col = st.dead ? '#555' : f > 0.6 ? OK : f > 0.3 ? WARN : DANGER;
-      g.fillStyle = col; g.fillRect(x - 6, y - 6, 12, 12);
-      if (st.dead) { g.strokeStyle = DANGER; g.beginPath(); g.moveTo(x - 7, y - 7); g.lineTo(x + 7, y + 7); g.moveTo(x + 7, y - 7); g.lineTo(x - 7, y + 7); g.stroke(); g.strokeStyle = 'rgba(159,232,255,0.5)'; }
-      let act = 0; for (let k = 0; k < 6; k++) act += p.throttle[i * 6 + k];
-      if (act > 0.05) { g.strokeStyle = '#cfe8ff'; g.beginPath(); g.arc(x, y, 9 + act * 2, 0, Math.PI * 2); g.stroke(); g.strokeStyle = 'rgba(159,232,255,0.5)'; }
+      const col = st.dead ? '#4a4f55' : f > 0.6 ? OK : f > 0.3 ? WARN : DANGER;
+      g.fillStyle = 'rgba(6,10,16,0.9)'; g.fillRect(cx - 7, cy - 7, 14, 14);
+      g.strokeStyle = col; g.lineWidth = 1.5; g.strokeRect(cx - 7, cy - 7, 14, 14);
+      g.fillStyle = col; g.globalAlpha = 0.25; g.fillRect(cx - 7, cy + 7 - 14 * f, 14, 14 * f); g.globalAlpha = 1;
+      if (st.dead) {
+        g.strokeStyle = DANGER; g.beginPath(); g.moveTo(cx - 6, cy - 6); g.lineTo(cx + 6, cy + 6); g.moveTo(cx + 6, cy - 6); g.lineTo(cx - 6, cy + 6); g.stroke();
+        return;
+      }
+      // nozzles: k=0..5 push +x,-x,+y,-y,+z,-z; exhaust leaves the opposite side, so light that side
+      const th = (n) => p.throttle[i * 6 + n];
+      const tri = (dx, dy, v) => {
+        const bx = cx - dx * 10, by = cy + dy * 10; // exhaust side
+        g.fillStyle = v > 0.03 ? `rgba(207,232,255,${0.35 + 0.65 * v})` : 'rgba(159,232,255,0.12)';
+        g.beginPath();
+        if (dx) { g.moveTo(bx, by); g.lineTo(bx - dx * 5, by - 4); g.lineTo(bx - dx * 5, by + 4); }
+        else { g.moveTo(bx, by); g.lineTo(bx - 4, by + dy * 5); g.lineTo(bx + 4, by + dy * 5); }
+        g.closePath(); g.fill();
+        thrSum += v;
+      };
+      tri(1, 0, th(0)); tri(-1, 0, th(1)); tri(0, 1, th(2)); tri(0, -1, th(3));
+      // fore/aft nozzles shown in the centre: ring = aft-firing (pushes forward), dot = fore-firing
+      const fwd = th(5), back = th(4);
+      thrSum += fwd + back;
+      if (fwd > 0.03) { g.strokeStyle = `rgba(207,232,255,${0.4 + 0.6 * fwd})`; g.beginPath(); g.arc(cx, cy, 3.5, 0, Math.PI * 2); g.stroke(); }
+      if (back > 0.03) { g.fillStyle = `rgba(207,232,255,${0.4 + 0.6 * back})`; g.beginPath(); g.arc(cx, cy, 2, 0, Math.PI * 2); g.fill(); }
     });
+    // suit breaches venting
     for (const lk of p.leaks) {
-      const x = ox + lk.p.x * s * 1.6, y = oy - 10 - lk.p.y * s * 0.9;
-      g.fillStyle = (this.game.time * 5) % 1 < 0.5 ? DANGER : '#fff';
-      g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill();
+      const [lx, ly] = P(lk.p.x * 1.25, lk.p.y * 0.95);
+      const pulse = 0.5 + 0.5 * Math.sin(t * 12);
+      g.fillStyle = DANGER; g.beginPath(); g.arc(lx, ly, 2.5 + pulse * 1.5, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = `rgba(255,255,255,${0.3 + 0.5 * pulse})`; g.beginPath(); g.moveTo(lx, ly); g.lineTo(lx + lk.n.x * 12, ly - lk.n.y * 12); g.stroke();
     }
+    // readouts
+    const integ = Math.round(hpSum / 120 * 100);
+    this.spaced('SUIT / RCS', ox, oy - 56, 9, '#8996a1', 'center', 700, 3);
+    this.spaced(`QUADS ${integ}%`, ox - 50, oy + 52, 9, integ > 60 ? '#8996a1' : WARN, 'left', 700, 1.5);
+    this.spaced(`RCS ${Math.round(Math.min(1, thrSum / 8) * 100)}%`, ox + 50, oy + 52, 9, thrSum > 0.1 ? '#cfe8ff' : '#8996a1', 'right', 700, 1.5);
     g.lineWidth = 1.5;
+  }
+
+  /** End-of-match banner during the slow-motion outro. */
+  drawEnding(cx, cy) {
+    const game = this.game, g = this.g, tt = game.endT || 0;
+    const won = game.endWon;
+    const title = won === 0 ? 'VICTORY' : won === 1 ? 'DEFEAT' : 'DRAW';
+    const col = won === 0 ? BLUE : won === 1 ? ORANGE : '#e9eef2';
+    g.fillStyle = `rgba(2,4,9,${Math.min(0.75, tt * 0.3)})`; g.fillRect(0, 0, this.W, this.H);
+    const a = clamp((tt - 0.3) / 0.5, 0, 1);
+    const w = this.W * Math.min(1, tt * 0.8);
+    g.fillStyle = 'rgba(6,10,16,0.75)'; g.fillRect(cx - w / 2, cy - 60, w, 120);
+    g.fillStyle = col; g.fillRect(cx - w / 2, cy - 60, w, 2); g.fillRect(cx - w / 2, cy + 58, w, 2);
+    g.globalAlpha = a;
+    const spacing = 30 - 18 * a;
+    if (this.glow) { g.shadowColor = col; g.shadowBlur = 24; }
+    this.spaced(title, cx, cy - 6, 64, col, 'center', 800, spacing, this.disp);
+    g.shadowBlur = 0;
+    this.spaced(`BLUE ${game.teamScore[0]}  —  ${game.teamScore[1]} ORANGE`, cx, cy + 38, 15, '#e9eef2', 'center', 700, 4);
+    g.globalAlpha = 1;
   }
 
   drawWeapon() {

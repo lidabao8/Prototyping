@@ -127,7 +127,7 @@ export class Bot {
       const d = _v.subVectors(e.pos, eye);
       const dist = d.length();
       const ang = Math.acos(clamp(d.dot(aim) / dist, -1, 1)) / DEG;
-      let score = dist + ang * 0.6;
+      let score = dist + ang * 0.6 + (this.game.world.inSpawn(e.pos, e.team) ? 200 : 0);
       // threat: is this enemy pointing at me?
       const ea = e.aimDir(_v2);
       if (-d.dot(ea) / dist > 0.97) score -= 20;
@@ -166,7 +166,9 @@ export class Bot {
     } else {
       let freshest = null;
       for (const k of this.known.values()) if (!freshest || k.t > freshest.t) freshest = k;
-      if (fuel < 0.14) this.state = 'refuel';
+      const pk = this.needAmmo() && this.nearestPickup();
+      if (pk) { this.state = 'resupply'; this.pickup = pk; }
+      else if (fuel < 0.14) this.state = 'refuel';
       else if (this.state === 'refuel' && fuel < 0.55 && !freshest) this.state = 'refuel';
       else if (freshest && t - freshest.t < 8) { this.state = 'hunt'; this.huntK = freshest; }
       else this.state = 'patrol';
@@ -224,6 +226,23 @@ export class Bot {
     if (s.weapon.def.kind !== 'beam' && s.weapon.mag === 0) s.startReload();
   }
 
+  needAmmo() {
+    const ws = this.s.weapons.filter((w) => w.def.kind !== 'beam');
+    if (!ws.length) return false;
+    const frac = ws.reduce((a, w) => a + (w.mag + w.reserve) / (w.def.mag + w.def.reserve), 0) / ws.length;
+    return frac < 0.3 || (this.s.grenades === 0 && frac < 0.6);
+  }
+
+  nearestPickup() {
+    let best = null, bd = Infinity;
+    for (const pk of this.game.pickups || []) {
+      if (pk.cool > 0 || this.game.world.inSpawn(pk.pos, 1 - this.s.team)) continue;
+      const d = pk.pos.distanceTo(this.s.pos);
+      if (d < bd) { bd = d; best = pk; }
+    }
+    return best;
+  }
+
   planGoal() {
     const g = this.game, s = this.s, w = g.world, t = g.time;
     this.goalT = t + 3 + Math.random() * 2;
@@ -232,12 +251,15 @@ export class Bot {
     else if (this.state === 'retreat') node = this.pickCoverNode(16, true);
     else if (this.state === 'refuel') { node = this.pickCoverNode(25, true); this.goalT = t + 8; }
     else if (this.state === 'hunt' && this.huntK) node = this.pickHuntNode(this.huntK.pos);
+    else if (this.state === 'resupply' && this.pickup) { node = w.nearestNode(this.pickup.pos, false); this.goalT = t + 10; }
     else node = this.pickPatrolNode();
     if (node < 0) return;
     this.goalNode = node;
     this.goal = w.nav[node].pos.clone();
     const threats = this.threatPositions();
-    this.path = w.findPath(s.pos, node, threats.length && this.state !== 'engage' ? (nd) => this.exposure(nd.pos, threats) * 6 : null);
+    const enemy = 1 - s.team;
+    const useThreats = threats.length && this.state !== 'engage';
+    this.path = w.findPath(s.pos, node, (nd) => (w.inSpawn(nd.pos, enemy) ? 400 : 0) + (useThreats ? this.exposure(nd.pos, threats) * 6 : 0));
     this.coast = false;
   }
 
@@ -257,7 +279,7 @@ export class Bot {
     const out = [];
     this.game.world.forNear(center, r, (i) => {
       const nd = this.game.world.nav[i];
-      if (nd.pos.distanceToSquared(center) < r * r) out.push(nd);
+      if (nd.pos.distanceToSquared(center) < r * r && !this.game.world.inSpawn(nd.pos, 1 - this.s.team)) out.push(nd);
     });
     // random subsample to bound cost
     for (let i = out.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [out[i], out[j]] = [out[j], out[i]]; }
@@ -282,11 +304,13 @@ export class Bot {
     const tp = _v3.copy(CHEST).applyQuaternion(tgt.quat).add(tgt.pos).clone();
     const threats = this.threatPositions();
     let best = -1, bestScore = Infinity;
-    for (const nd of this.candidates(s.pos, 20, 36)) {
+    // rushers and flankers search further and care more about closing to their range
+    const closer = this.role !== 'anchor';
+    for (const nd of this.candidates(s.pos, closer ? 30 : 20, closer ? 44 : 36)) {
       const dist = nd.pos.distanceTo(tp);
       if (dist < 4) continue;
       if (!w.los(nd.pos, tp, true)) continue;
-      let score = Math.abs(dist - pref) * 0.5 + nd.pos.distanceTo(s.pos) * 0.35;
+      let score = Math.abs(dist - pref) * (closer ? 0.85 : 0.5) + nd.pos.distanceTo(s.pos) * 0.3;
       if (nd.surf) score -= 7;           // can anchor there: stable aim, free push-off, fuel regen
       // use the third dimension: attack from above/below the target's own plane, where it has to pitch to answer
       const off = _v.subVectors(nd.pos, tp).normalize();
@@ -416,7 +440,7 @@ export class Bot {
     } else if (this.goal) { wp = this.goal; final = true; }
 
     const vDes = _v2.set(0, 0, 0);
-    let cruise = { engage: 3, retreat: 6, refuel: 3.5, hunt: 4.5, patrol: 5 }[this.state] || 4.5;
+    let cruise = { engage: 3, retreat: 6, refuel: 3.5, hunt: 4.5, patrol: 5, resupply: 5.5 }[this.state] || 4.5;
     if (this.role === 'rusher' && this.state !== 'retreat') cruise *= 1.25;
     if (fuel < 0.35) cruise *= 0.65;
     if (this.coast) cruise = Math.max(cruise, s.vel.length());
@@ -584,13 +608,15 @@ export class Bot {
     const tgt = this.target;
     if (!tgt) { this.flushGrenade(); return; }
     if (t < this.acquireT) return;
+    if (g.world.inSpawn(tgt.pos, tgt.team)) return; // shielded: don't waste ammo
     const eye = this.eye;
     const dist = tgt.pos.distanceTo(eye);
     if (dist < MELEE.range && s.meleeCool <= 0) { g.combat.melee(s); return; }
     const aim = s.aimDir(_v);
     const angErr = Math.acos(clamp(aim.dot(this.trueAim), -1, 1));
     const tol = Math.atan(0.42 / dist) * 1.35 + 0.15 * DEG + (s.weapon.def.kind === 'pellets' ? 2.5 * DEG : 0);
-    if (angErr > tol || s.weapon.reloadT > 0 || s.switchT > 0) return;
+    const holdBeam = s.weapon.def.kind === 'beam' && s.beam && s.beam.life > 0 ? 2.2 : 1; // keep a beam on target instead of strobing
+    if (angErr > tol * holdBeam || s.weapon.reloadT > 0 || s.switchT > 0) return;
     const wsb = s.weapon;
     if (wsb.def.kind === 'beam') {
       // heat discipline: let the emitter cool before it locks out

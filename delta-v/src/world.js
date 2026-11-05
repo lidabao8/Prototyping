@@ -183,6 +183,70 @@ export class World {
     this.buildPods();
     this.buildNav();
     this.spawns = [this.makeSpawns(-1), this.makeSpawns(1)];
+    this.buildBarriers();
+    this.pickupSpots = this.makePickupSpots();
+  }
+
+  // ---------- Spawn shields ----------
+  /** Plane |x| = barrierX closes off each team's spawn bay: blue at -x, orange at +x. */
+  buildBarriers() {
+    this.barrierX = this.enclosed ? 55.8 : 112;
+    const B = this.def.bounds;
+    this.barriers = [];
+    for (const team of [0, 1]) {
+      const col = new THREE.Color(team === 0 ? 0x3f8cff : 0xff8a2a);
+      const mat = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        uniforms: { time: { value: 0 }, color: { value: col }, flash: { value: 0 } },
+        vertexShader: 'varying vec2 vUv; varying vec3 vW; void main(){ vUv = uv; vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }',
+        fragmentShader: `uniform float time; uniform vec3 color; uniform float flash; varying vec2 vUv; varying vec3 vW;
+          float hex(vec2 p){ p.x *= 1.1547; p.y += mod(floor(p.x), 2.0)*0.5; p = abs(fract(p) - 0.5); return abs(max(p.x*1.5 + p.y, p.y*2.0) - 1.0); }
+          void main(){
+            vec2 p = vW.zy * 0.45;
+            float h = smoothstep(0.08, 0.0, hex(p));
+            float scan = 0.5 + 0.5*sin(vW.y*0.6 - time*2.0);
+            float edge = smoothstep(0.0, 0.04, vUv.x) * smoothstep(0.0, 0.04, 1.0 - vUv.x) * smoothstep(0.0, 0.04, vUv.y) * smoothstep(0.0, 0.04, 1.0 - vUv.y);
+            float a = (0.035 + h*0.16*(0.6 + 0.4*scan) + flash*0.25) * edge;
+            gl_FragColor = vec4(color*1.6, a);
+          }`,
+      });
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(2 * B[2], 2 * B[1]), mat);
+      m.rotation.y = Math.PI / 2;
+      m.position.set((team === 0 ? -1 : 1) * this.barrierX, 0, 0);
+      m.renderOrder = 5;
+      this.group.add(m);
+      this.barriers.push({ mesh: m, mat, team });
+    }
+  }
+
+  /** True when p is inside the spawn bay that protects `team`. */
+  inSpawn(p, team) { return team === 0 ? p.x < -this.barrierX : p.x > this.barrierX; }
+
+  /** If segment a->b crosses into `team`'s spawn bay, returns the fraction along it, else -1. */
+  barrierCross(a, b, team) {
+    const X = team === 0 ? -this.barrierX : this.barrierX;
+    const da = a.x - X, db = b.x - X;
+    const inside = (v) => (team === 0 ? v < 0 : v > 0);
+    if (inside(da) || !inside(db)) return -1;
+    return da / (da - db);
+  }
+
+  updateBarriers(time) { for (const b of this.barriers) { b.mat.uniforms.time.value = time; b.mat.uniforms.flash.value *= 0.9; } }
+
+  // ---------- Ammo depots ----------
+  makePickupSpots() {
+    const k = this.def.bounds[0] / 72, ky = this.def.bounds[1] / 36;
+    const half = this.enclosed
+      ? [[30, 18, 2], [12, -16, 26], [40, -6, -22]]
+      : [[60, 12, 14], [40, 30, -30], [90, -22, 24]];
+    const pts = [];
+    for (const [x, y, z] of half) { pts.push([x, y, z], [-x, -y, -z]); }
+    pts.push(this.enclosed ? [0, 26, -14] : [0, 40, 12], this.enclosed ? [0, -26, 14] : [0, -40, -12]);
+    void k; void ky;
+    return pts.map(([x, y, z]) => {
+      const i = this.nearestNode(new THREE.Vector3(x, y, z), false);
+      return this.nav[i].pos.clone();
+    });
   }
 
   dispose() { this.scene.remove(this.group); }

@@ -34,15 +34,24 @@ npm run build      # or: npm run watch / npm run serve (http://localhost:8081)
 * **Loadout:** pick a primary and a secondary in the menu (or from the pause menu, for your next deploy). Weapon mass counts towards your suit's mass.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
   * **FL-12 flechette:** heavy recoil (about 0.75 m/s per shot). It doubles as an escape burn.
-  * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius and a small splash.
+  * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius (30 reserve rockets) and a small splash.
   * **RR-90 recoilless:** a single 88-damage HE slug with a 4 m blast and no recoil. The slug homes slightly: it locks the enemy nearest the crosshair within about 7° (shown as TRACK) and steers at up to 90 m/s² sideways. The backblast shoves (and hurts enemies) up to 7 m behind you. Fully aimed, it switches to a full-screen scope.
-  * **LM-2 maser:** a continuous yellow beam, 55 damage per second while held. No recoil, no ammo; it overheats after about 2 s of fire and vents.
+  * **LM-2 maser:** a steady continuous beam (gunmetal body, yellow accents), 80 damage per second while held. No recoil, no ammo; it overheats after about 2 s of fire and vents.
 * **Grenades:** thrown at 18 m/s on a 3.5 s fuse. They fly straight, bounce elastically off walls, and leave the hand partway through a throw animation.
 * **Momentum hammer (V):** sends the target tumbling.
 * **Hip-fire vs aiming:** hip-fire spreads several times wider than aiming down the sights. Every gun has a working sight (holographic sights on the rifle, flechette and maser; scopes on the gyrojet and recoilless), aligned to the screen centre when you aim, with its own magnification. Bots aim down the sights once they've settled on a target at range.
 * **Tracers:** every round leaves the actual barrel (your viewmodel's muzzle, or a bot's gun) and converges on the crosshair point, drawn as a glowing streak.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
 * **Wall and pod impacts:** hitting a wall above 8 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
+
+### Spawn shields and ammo depots
+
+* **Spawn shields:** each team's spawn bay is closed off by a hex force field in the team colour.
+  * Enemy rounds, beams and grenades stop at it.
+  * Nobody inside their own bay can be damaged by the enemy.
+  * Intruders are shoved back out and burned.
+  * Bots route around enemy bays and don't waste fire on shielded targets.
+* **Ammo depots:** glowing canisters at symmetric spots on each map. Touch one to refill reserves and grenades. It recharges for 20 s. Bots running low go and resupply.
 
 ### Physics toggles (menu)
 
@@ -76,7 +85,7 @@ There are also options for infinite gas and enemy outlines.
 **Animations:** first-person and third-person animations for:
 
 * recoil;
-* magazine reloads: the empty mag floats away in zero-g, the hand fetches a new one and slaps it in, and empty reloads end with a charging-handle rack;
+* magazine reloads: the empty mag floats away in zero-g, and the hand fetches a fresh one from the belt pouch (visible in hand), seats it and slaps it. Empty reloads end with a charging-handle rack, and each step has its own click, clack and rack sound;
 * the gyrojet's drum swap, finished with a spin;
 * shell-by-shell flechette reloads, with a visible shell in the hand;
 * the flechette pump after each shot;
@@ -101,12 +110,14 @@ A sticky footer shows a match summary and the Deploy button (Enter also deploys)
 **In-game HUD:** clipped-corner glass plates and Orbitron numerals.
 
 * A team score header with a timer.
-* A vitals cluster: Δv ring gauge, segmented health, O₂ and a suit diagram.
+* A vitals cluster: Δv ring gauge, segmented health, O₂, and a suit / RCS schematic. The schematic shows the suit silhouette, each quad's health, all six nozzles per quad lighting with throttle, venting breaches, and quad-integrity and RCS percentages.
 * A weapon cluster with ammo pips and grenade icons.
 * Kill-feed chips and banner messages.
 * A redesigned death screen.
 
-**Sights:** sci-fi holographic sights with simple reticles (dot and ticks, broken ring, chevron, bars), and square scopes with a glowing objective ring.
+**Sights:** the light guns (rifle, flechette, maser) use frameless projected dots: a slim emitter with the reticle floating in the air. The gyrojet has a framed holographic sight, and the recoilless a scope with a full-screen optic.
+
+**Match end:** a slow-motion outro with a VICTORY / DEFEAT banner, then a results screen whose rows animate in.
 
 **Grenades:** a detailed model with a ribbed body, team band, fuse head, spoon, pin ring, and a fuse lamp that blinks faster as it runs down.
 

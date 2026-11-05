@@ -126,6 +126,15 @@
   tr.dead td { opacity:0.45; }
   td.lo { color:var(--dim); font-size:12px; }
   #endBoard { display:flex; gap:14px; flex-wrap:wrap; }
+  #end.reveal .kicker, #end.reveal h1, #end.reveal #endScore, #end.reveal .row { animation:rise .6s cubic-bezier(.2,.8,.2,1) both; }
+  #end.reveal h1 { animation-delay:.1s; letter-spacing:0.2em; }
+  #end.reveal #endScore { animation-delay:.25s; }
+  #end.reveal .row { animation-delay:.9s; }
+  #end.reveal .bteam { animation:rise .5s ease both .35s; }
+  #end.reveal tr { animation:rowIn .35s ease both; }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  @keyframes rowIn { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { #end.reveal * { animation:none !important; } }
   #endBoard .bteam { flex:1 1 300px; }
   #lockhint { position:fixed; left:50%; top:60%; transform:translateX(-50%); display:none; background:var(--panel); padding:10px 18px; border:1px solid var(--line); cursor:pointer; }
   @media (max-width:700px) { .mm-top { align-items:flex-start; } .tabs { margin-left:0; } .deploy { margin-left:0; width:100%; justify-content:center; } .slots { grid-template-columns:1fr; } }

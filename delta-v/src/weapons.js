@@ -12,7 +12,7 @@ export const WEAPONS = {
   },
   gyrojet: {
     id: 'gyrojet', hipSpread: 0.008, adsSpread: 0.0008, name: 'GJ-3 GYROJET', short: 'GJ-3', kind: 'rocket',
-    speed: 30, accel: 280, burn: 1.3, dmg: 72, headMul: 1.3, splash: 3.2, splashDmg: 45, projRadius: 0.3, rpm: 100, mag: 5, reserve: 15, reload: 2.6,
+    speed: 30, accel: 280, burn: 1.3, dmg: 72, headMul: 1.3, splash: 3.2, splashDmg: 45, projRadius: 0.3, rpm: 100, mag: 5, reserve: 30, reload: 2.6,
     spread: 0.001, auto: false, mass: 5.0, kick: 0.006, ejecta: 0.6, tracer: 0xff7040, sound: 'gyro',
   },
   recoilless: {
@@ -26,7 +26,7 @@ export const WEAPONS = {
   maser: {
     id: 'maser', hipSpread: 0.005, adsSpread: 0.0004, name: 'LM-2 MASER', short: 'LM-2', kind: 'beam',
     // continuous beam: damage per second while the trigger is held; heats 0.5/s, so ~2 s of fire from cold
-    range: 180, dps: 55, dmg: 0, headMul: 1.5, rpm: 3600, mag: 1, reserve: 0, reload: 0, heatRate: 0.5, coolRate: 0.35,
+    range: 180, dps: 80, dmg: 0, headMul: 1.5, rpm: 3600, mag: 1, reserve: 0, reload: 0, heatRate: 0.5, coolRate: 0.35,
     spread: 0.0004, auto: true, mass: 5.5, kick: 0, tracer: 0xffd23a, sound: 'maser',
   },
 };

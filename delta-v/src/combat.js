@@ -164,17 +164,19 @@ export class Combat {
     s.spawnProtect = 0;
     s.lastFireT = g.time;
     const eye = s.eye(new THREE.Vector3());
-    const d = s.aimDir(new THREE.Vector3());
-    d.addScaledVector(randomPerp(d, _v), Math.tan(this.spreadOf(s, def) * Math.sqrt(Math.random()))).normalize();
+    const d = s.aimDir(new THREE.Vector3()); // beams are steady: no per-frame jitter
     const h = g.world.raycast(eye, d, def.range);
     let end = h ? h.t : def.range;
+    const fb = g.world.barrierCross(eye, _v3.copy(eye).addScaledVector(d, end), 1 - s.team);
+    if (fb >= 0) { end *= fb; g.world.barriers[1 - s.team].mat.uniforms.flash.value = 1; }
     const hit = this.raySoldier(eye, d, end, s);
     if (hit) end = hit.t;
     const hp = eye.clone().addScaledVector(d, end);
     const muzzle = this.muzzlePoint(s, new THREE.Vector3());
     // one live beam per shooter, refreshed each frame
     if (!s.beam || s.beam.life <= 0) { s.beam = { a: new THREE.Vector3(), b: new THREE.Vector3(), life: 0 }; this.beams.push(s.beam); }
-    s.beam.a.copy(muzzle); s.beam.b.copy(hp); s.beam.life = 0.07;
+    if (s.beam.life > 0) s.beam.b.lerp(hp, Math.min(1, dt * 30)); else s.beam.b.copy(hp);
+    s.beam.a.copy(muzzle); s.beam.life = 0.14;
     if (hit) {
       const t = hit.s;
       if (t.team !== s.team && t.spawnProtect <= 0) {
@@ -186,8 +188,10 @@ export class Combat {
         g.damage(t, dmg, s, def.id, hp, hit.part.part);
       }
     }
-    if (Math.random() < 0.6) g.fx.sparks(hp, 2, hit ? d.clone().negate() : (h ? h.n : d.clone().negate()), 3, COLORS.beam);
-    if (Math.random() < 0.3) g.fx.add.spawn(hp, null, COLORS.beam, 0.35, 0.06);
+    // steady impact: fixed-rate sparks plus a constant glow
+    w.sparkAcc = (w.sparkAcc || 0) + dt * 40;
+    while (w.sparkAcc >= 1) { w.sparkAcc -= 1; g.fx.sparks(hp, 1, hit ? d.clone().negate() : (h ? h.n : d.clone().negate()), 2.5, COLORS.beam); }
+    g.fx.add.spawn(hp, null, COLORS.beam, 0.32, 0.05, { alpha: 0.8 });
     w.sndT = (w.sndT || 0) - dt;
     if (w.sndT <= 0) { w.sndT = 0.12; g.onShot(s, def); }
     return true;
@@ -295,6 +299,9 @@ export class Combat {
       let bestT = len, hitKind = null, hitObj = null, hitPart = null, hitN = null;
       const h = world.raycast(p.pos, dir, len);
       if (h) { bestT = h.t; hitKind = h.kind; hitObj = h.obj; hitN = h.n.clone(); }
+      // enemy spawn shields stop incoming fire
+      const fb = world.barrierCross(p.pos, _v3.copy(p.pos).addScaledVector(dir, len), 1 - p.owner.team);
+      if (fb >= 0 && fb * len < bestT) { bestT = fb * len; hitKind = 'barrier'; hitObj = world.barriers[1 - p.owner.team]; hitN = new THREE.Vector3(p.owner.team === 0 ? -1 : 1, 0, 0); }
       for (const s of g.soldiers) {
         if (!s.alive) continue;
         if (s === p.owner && (p.kind !== 'rocket' || p.age < 0.4)) continue;
@@ -323,7 +330,9 @@ export class Combat {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const gr = this.grenades[i];
       gr.fuse -= dt;
+      const prev = _v3.copy(gr.pos);
       gr.pos.addScaledVector(gr.vel, dt);
+      if (world.barrierCross(prev, gr.pos, 1 - gr.owner.team) >= 0) { gr.pos.copy(prev); gr.vel.x *= -GRENADE.restitution; world.barriers[1 - gr.owner.team].mat.uniforms.flash.value = 1; }
       world.sphereContacts(gr.pos, 0.12, (n, depth) => {
         gr.pos.addScaledVector(n, depth);
         const vn = gr.vel.dot(n);
@@ -355,6 +364,11 @@ export class Combat {
 
   onHit(p, hp, dir, kind, obj, part, n) {
     const g = this.game, def = p.def;
+    if (kind === 'barrier') {
+      obj.mat.uniforms.flash.value = 1;
+      g.fx.sparks(hp, 10, n, 4, obj.mat.uniforms.color.value);
+      return;
+    }
     const momentum = def.projMass ? def.projMass * def.speed : 2;
     if (kind === 'soldier') {
       const s = obj;
@@ -397,6 +411,7 @@ export class Combat {
     for (const s of g.soldiers) {
       const d = s.pos.distanceTo(pos);
       if (d > radius) continue;
+      if (s.team !== owner.team && g.world.inSpawn(s.pos, s.team)) continue; // shielded bay
       if (!g.world.los(pos, s.pos, true)) continue;
       const f = 1 - d / radius;
       const dir = _v.subVectors(s.pos, pos);

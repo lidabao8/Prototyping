@@ -525,7 +525,8 @@ export class Soldier {
       if (w.reloadT <= 0) {
         if (w.def.perShell) {
           if (w.reserve > 0 && w.mag < w.def.mag) { w.mag++; w.reserve--; }
-          if (w.mag < w.def.mag && w.reserve > 0 && !w.cancel) w.reloadT = w.def.reload; else w.reloadT = 0;
+          if (w.mag < w.def.mag && w.reserve > 0 && !w.cancel) w.reloadT = w.def.reload;
+          else { w.reloadT = 0; if (w.emptyReload) { w.rackT = this.game.time; w.rackSnd = false; } }
         } else {
           const n = Math.min(w.def.mag - w.mag, w.reserve);
           w.mag += n; w.reserve -= n; w.reloadT = 0;

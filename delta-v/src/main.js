@@ -546,6 +546,8 @@ class Game {
     this.applySettings();
     this.teamScore = [0, 0];
     this.weaponKills = {};
+    this.buildPickups();
+    this.endT = 0;
     this.scoreLimit = st.scoreLimit;
     this.timeLimit = 10 * 60;
     this.matchTime = 0;
@@ -574,6 +576,61 @@ class Game {
     try { this.renderer.compile(this.scene, this.camera); } catch (e) { /* optional warm-up */ }
     this.gfx.setupShadows(this.world);
     this.last = performance.now();
+  }
+
+  buildPickups() {
+    if (this.pickups) for (const pk of this.pickups) this.scene.remove(pk.mesh);
+    const body = new THREE.MeshStandardMaterial({ color: 0x3c444c, roughness: 0.5, metalness: 0.7 });
+    const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x7dff9a).multiplyScalar(2) });
+    this.pickups = this.world.pickupSpots.map((pos) => {
+      const g = new THREE.Group();
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, 0.45), body); g.add(crate);
+      for (const x of [-0.25, 0.25]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.47, 0.47), glow); b.position.x = x; g.add(b); }
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.02, 6, 32), glow); ring.rotation.x = Math.PI / 2; g.add(ring);
+      g.position.copy(pos);
+      this.scene.add(g);
+      return { pos, mesh: g, ring, cool: 0 };
+    });
+  }
+
+  /** Ammo depots: touch one to refill reserves and grenades; it recharges for 20 s. */
+  updatePickups(dt) {
+    for (const pk of this.pickups) {
+      pk.cool = Math.max(0, pk.cool - dt);
+      const ready = pk.cool <= 0;
+      pk.mesh.rotation.y += dt * 0.8;
+      pk.mesh.scale.setScalar(ready ? 1 + Math.sin(this.time * 3) * 0.04 : 0.55);
+      pk.ring.visible = ready;
+      if (!ready) continue;
+      for (const s of this.soldiers) {
+        if (!s.alive || s.pos.distanceTo(pk.pos) > 1.9) continue;
+        const need = s.weapons.some((w) => w.def.kind !== 'beam' && w.reserve < w.def.reserve) || s.grenades < 2;
+        if (!need) continue;
+        for (const w of s.weapons) w.reserve = Math.max(w.reserve, w.def.reserve);
+        s.grenades = 2;
+        pk.cool = 20;
+        if (s.isPlayer) { this.hud.message('AMMO RESUPPLIED', '#7dff9a', 1.6); this.audio.play('reload'); }
+        this.fx.sparks(pk.pos, 12, null, 3, new THREE.Color(0x7dff9a));
+        break;
+      }
+    }
+  }
+
+  /** Spawn shields: intruders are shoved out and burned; nobody inside can be hurt by the enemy. */
+  updateSpawnShields(dt) {
+    const w = this.world;
+    for (const s of this.soldiers) {
+      if (!s.alive) continue;
+      const enemy = 1 - s.team;
+      if (!w.inSpawn(s.pos, enemy)) { if (s.isPlayer) this.inEnemySpawn = false; continue; }
+      const dir = enemy === 0 ? 1 : -1; // back toward mid-map
+      s.vel.x += dir * 14 * dt;
+      if (s.vel.x * dir < 2) s.vel.x = dir * 2;
+      if (s.grab) this.releaseGrab(s);
+      this.damage(s, 35 * dt, null, 'spawn shield');
+      w.barriers[enemy].mat.uniforms.flash.value = 1;
+      if (s.isPlayer && !this.inEnemySpawn) { this.inEnemySpawn = true; this.hud.message('ENEMY SPAWN SHIELD – GET OUT', '#ff4b3a', 1.5); }
+    }
   }
 
   respawn(s, initial = false) {
@@ -651,6 +708,7 @@ class Game {
   damage(s, amount, attacker, cause, point, part) {
     if (!s.alive) return;
     if (s.spawnProtect > 0 && cause !== 'hypoxia') return;
+    if (attacker && attacker.team !== s.team && this.world.inSpawn(s.pos, s.team)) return; // shielded spawn bay
     s.health -= amount;
     s.lastDamageT = this.time;
     if (attacker && attacker !== s) { s.lastAttacker = attacker; s.lastAttackerT = this.time; }
@@ -692,14 +750,38 @@ class Game {
 
   endMatch() {
     if (this.state !== 'playing' && this.state !== 'paused') return;
+    // slow-motion outro with a banner, then the results screen
+    this.state = 'ending'; this.endT = 0;
+    this.show(null);
+    this.endWon = this.teamScore[0] > this.teamScore[1] ? 0 : this.teamScore[1] > this.teamScore[0] ? 1 : -1;
+    this.audio.play(this.endWon === 0 ? 'kill' : 'warn');
+  }
+
+  tickEnding(dt) {
+    this.endT += dt;
+    const sdt = dt * Math.max(0.12, 1 - this.endT * 0.6);
+    this.time += sdt;
+    for (const b of this.bots) b.update(sdt);
+    this.acc += sdt;
+    let n = 0;
+    while (this.acc >= STEP && n < 4) { this.substep(STEP); this.acc -= STEP; n++; }
+    for (const s of this.soldiers) if (s.alive) s.update(sdt);
+    if (this.endT > 3.2) this.finishMatch();
+  }
+
+  finishMatch() {
     this.state = 'ended';
     if (document.pointerLockElement) document.exitPointerLock();
-    const won = this.teamScore[0] > this.teamScore[1] ? 0 : this.teamScore[1] > this.teamScore[0] ? 1 : -1;
+    const won = this.endWon;
     document.getElementById('endTitle').textContent = won === 0 ? 'VICTORY' : won === 1 ? 'DEFEAT' : 'DRAW';
     document.getElementById('endTitle').style.color = won === 0 ? '#3f8cff' : won === 1 ? '#ff8a2a' : '#e9eef2';
     document.getElementById('endScore').textContent = `${this.teamScore[0]} – ${this.teamScore[1]}`;
     document.getElementById('endBoard').innerHTML = this.boardHTML();
     this.show('end');
+    // staggered reveal
+    const end = this.ui.end;
+    end.classList.remove('reveal'); void end.offsetWidth; end.classList.add('reveal');
+    end.querySelectorAll('tr').forEach((tr, i) => { tr.style.animationDelay = (0.5 + i * 0.05) + 's'; });
   }
 
   boardHTML() {
@@ -888,11 +970,15 @@ class Game {
         }
       }
       if (this.matchTime >= this.timeLimit) this.endMatch();
+      this.updatePickups(dt);
+      this.updateSpawnShields(dt);
       this.emitThrusterFx(dt);
     } else if (this.state === 'menu') {
       this.time += dt;
       this.world.updatePods(dt, this.time);
     }
+    if (this.state === 'ending') this.tickEnding(dt);
+    this.world.updateBarriers(this.time);
     if (this.state !== 'paused') { this.fx.update(dt, this.combat.tracerList()); this.combat.syncMeshes(dt); }
     this.world.syncPodMeshes();
     for (const s of this.soldiers) s.syncModel(dt);
@@ -931,7 +1017,7 @@ class Game {
     const magOff = new THREE.Vector3();
     let magVis = true;
     const belt = new THREE.Vector3(-0.12, -0.5, -0.22);
-    let shellVis = false, magSpin = 0;
+    let shellVis = false, magSpin = 0, carry = false;
     if (w.reloadT > 0 && def.reload > 0) {
       const r = 1 - w.reloadT / def.reload;
       if (def.perShell) {
@@ -960,7 +1046,11 @@ class Game {
         if (this.prevReloadR != null && this.prevReloadR < 0.26 && r >= 0.26) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, -1.2, 0.2));
         if (drum && r > 0.8 && r < 0.95) magSpin = sm(0.8, 0.95, r) * Math.PI * 2;
         const magW = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
-        handOverride = r < 0.08 ? null : r < 0.26 ? magW : r < 0.55 ? belt.clone().lerp(magW, sm(0.45, 0.55, r)) : r < 0.82 ? magW.clone().add(new THREE.Vector3(0, -0.03, 0)) : null;
+        // hand: thumb the release, down to the belt pouch, back up carrying the fresh mag, seat it
+        const pouch = belt.clone().add(new THREE.Vector3(0.04, 0.06, -0.04));
+        const below = this.gunPoint(gun, ud.magRest.clone().add(new THREE.Vector3(0, -0.3, 0)), pos, rot);
+        handOverride = r < 0.08 ? null : r < 0.26 ? magW : r < 0.4 ? magW.clone().lerp(pouch, sm(0.26, 0.4, r)) : r < 0.55 ? pouch.clone().lerp(below, sm(0.42, 0.55, r)) : r < 0.82 ? magW.clone().add(new THREE.Vector3(0, -0.03, 0)) : null;
+        carry = r > 0.4 && r < 0.55;
         if (r > 0.8 && r < 0.88) pos.y += 0.014 * bell((r - 0.8) / 0.08); // slap
         // racking the charging handle after an empty reload
         if (w.emptyReload && r > 0.86) {
@@ -969,8 +1059,17 @@ class Game {
           handOverride = ch; rot.y += 0.12 * q; pos.x += 0.02 * q;
         }
       }
+      // reload foley at fixed points of the animation
+      const cross = (x) => this.prevReloadR != null && this.prevReloadR < x && r >= x;
+      if (!def.perShell && !ud.breech) { if (cross(0.22)) this.audio.play('magout'); if (cross(0.76)) this.audio.play('magin'); if (w.emptyReload && cross(0.9)) this.audio.play('rack'); }
+      if (ud.breech) { if (cross(0.3)) this.audio.play('magout'); if (cross(0.82)) this.audio.play('magin'); }
+      if (def.perShell && cross(0.5)) this.audio.play('shell');
       this.prevReloadR = r;
+      this.settleT = t;
     } else this.prevReloadR = null;
+    // small settle wobble right after a reload finishes
+    const st = t - (this.settleT || -9);
+    if (st > 0 && st < 0.6 && w.reloadT <= 0) { rot.x += 0.04 * Math.sin(st * 18) * Math.exp(-st * 7); }
     if (def.kind === 'beam' && w.overheat) {
       // vent: tilt the emitter, slide the cell out, steam out of the vents
       rot.z += 0.35; rot.x += 0.22; magOff.x = -0.035; magOff.z = 0.02;
@@ -978,8 +1077,9 @@ class Game {
     }
     if (ud.pump && w.reloadT <= 0) {
       // pump cycles after each shot
-      const since = t - p.lastFireT;
+      const since = t - Math.max(p.lastFireT, w.rackT || -9);
       magOff.z = 0.1 * bell((since - 0.12) / 0.35);
+      if (w.rackT && Math.abs(t - w.rackT - 0.2) < 0.02 && !w.rackSnd) { w.rackSnd = true; this.audio.play('rack'); }
     }
     // grenade throw
     let nadeVis = false;
@@ -1010,6 +1110,13 @@ class Game {
     this.placeArm(this.vmArmL, handW, new THREE.Vector3(-0.4, -0.58, 0.05));
     this.vmNade.visible = nadeVis;
     this.vmShell.visible = shellVis;
+    // the fresh magazine travels up from the pouch in the hand
+    if (!this.vmCarry || this.vmCarry.userData.id !== def.id) {
+      if (this.vmCarry) this.vm.remove(this.vmCarry);
+      this.vmCarry = ud.mag.clone(true); this.vmCarry.userData.id = def.id; this.vmCarry.scale.setScalar(this.vmS); this.vm.add(this.vmCarry);
+    }
+    this.vmCarry.visible = carry;
+    if (carry) { this.vmCarry.position.copy(handW).add(new THREE.Vector3(0.0, 0.04, -0.02)); this.vmCarry.quaternion.setFromEuler(rot).multiply(_q.setFromEuler(new THREE.Euler(0.4, 0, 0.3))); }
     if (shellVis) this.vmShell.position.copy(handW).add(new THREE.Vector3(0.01, 0.03, -0.03));
     if (nadeVis) this.vmNade.position.copy(handW).add(new THREE.Vector3(0.0, 0.035, -0.04));
     this.vmFlash.intensity *= Math.exp(-dt * 30);

@@ -285,7 +285,7 @@ export class Effects {
       if (len < 0.05) continue;
       dir.copy(t.vel).normalize();
       mid.copy(t.pos).addScaledVector(dir, -len / 2);
-      if (t.beam) { put(mid, dir, len, t.width, t.color, 3.2); put(mid, dir, len, t.width * 4, t.color, 0.5); }
+      if (t.beam) { put(mid, dir, len, t.width * 0.6, this._white || (this._white = new THREE.Color(1, 0.97, 0.85)), 2.2); put(mid, dir, len, t.width * 1.6, t.color, 1.6); put(mid, dir, len, t.width * 5, t.color, 0.28); }
       else put(mid, dir, len, t.width, t.color, 2.4);
     }
     this.streaks.count = k;

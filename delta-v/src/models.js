@@ -147,6 +147,19 @@ function holoSight(B, M, y, z, reticleMat, wide = 0.05, kind = 'ticks', edgeMat 
   return [glass, ret];
 }
 
+/** Frameless holo: a slim emitter block on the rail projects the reticle into open air (no window frame). */
+function floatingDot(B, M, y, z, reticleMat, kind, edgeMat) {
+  B.add(RB(0.03, 0.016, 0.05, 0.005), M.poly, 0, y - 0.03, z + 0.02);
+  B.add(RB(0.024, 0.01, 0.028, 0.004), M.gun, 0, y - 0.019, z + 0.03, -0.35);
+  B.add(BOX(0.016, 0.003, 0.004), edgeMat || reticleMat, 0, y - 0.014, z + 0.017);
+  // faint projected plane so the dot reads as a hologram
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.026), new THREE.MeshBasicMaterial({ color: reticleMat.color, transparent: true, opacity: 0.05, depthWrite: false, blending: THREE.AdditiveBlending }));
+  glow.position.set(0, y, z - 0.01);
+  const ret = reticle(kind, reticleMat);
+  ret.position.set(0, y, z - 0.011);
+  return [glow, ret];
+}
+
 /** Sci-fi scope: a hollow squared tube you can actually look through, glowing objective ring, side rangefinder. */
 function scopeSight(B, M, y, z, len, r, reticleMat, edgeMat = null) {
   const W = r * 2.3, T = r * 0.28;          // outer width, wall thickness
@@ -200,7 +213,7 @@ export function buildGun(id, teamColor, opts = {}) {
     B.add(BOX(0.03, 0.025, 0.05), M.gun, 0.04, 0.02, -0.02);
     MB.add(RB(0.038, 0.17, 0.07, 0.01), M.poly, 0, -0.08, 0, 0.18);
     MB.add(BOX(0.04, 0.02, 0.072), M.metal, 0, -0.165, -0.015, 0.18);
-    extra = holoSight(B, M, 0.1, -0.08, M.red, 0.05, 'ticks');
+    extra = floatingDot(B, M, 0.1, -0.08, M.red, 'ticks');
     ud.sight.set(0, 0.1, -0.1); ud.zoom = 1.6; ud.magRest = new THREE.Vector3(0, -0.05, -0.15); ud.muzzle.set(0, 0.012, -0.78);
   } else if (id === 'shotgun') {
     B.add(RB(0.085, 0.11, 0.32, 0.015), M.gun, 0, 0, -0.04);
@@ -215,7 +228,7 @@ export function buildGun(id, teamColor, opts = {}) {
     for (let i = 0; i < 4; i++) B.add(CYL(0.008, 0.008, 0.03, 8), M.red, 0.045, 0.0, -0.1 - i * 0.04, 0, 0, Math.PI / 2);
     MB.add(RB(0.06, 0.06, 0.15, 0.02), M.tan, 0, 0, 0);
     for (let i = 0; i < 5; i++) MB.add(BOX(0.062, 0.006, 0.01), M.poly, 0, 0.0, -0.06 + i * 0.03);
-    extra = holoSight(B, M, 0.092, -0.05, M.green, 0.044, 'ring', M.green);
+    extra = floatingDot(B, M, 0.092, -0.05, M.green, 'ring', M.green);
     ud.sight.set(0, 0.092, -0.07); ud.zoom = 1.25; ud.muzzle.set(0, 0.025, -0.64); ud.magRest = new THREE.Vector3(0, -0.022, -0.4); ud.hand.set(0, -0.04, -0.4); ud.pump = true;
   } else if (id === 'gyrojet') {
     // tri-barrel rocket carbine with a drum magazine
@@ -260,21 +273,23 @@ export function buildGun(id, teamColor, opts = {}) {
   } else {
     // LM-2 maser: dark angular body, exposed yellow energy cells, twin emitter prongs around a glowing core
     B.add(RB(0.085, 0.1, 0.36, 0.02), M.gun, 0, 0, -0.05);
-    B.add(RB(0.07, 0.035, 0.3, 0.012), M.yellowPaint, 0, 0.06, -0.06);
+    B.add(RB(0.07, 0.035, 0.3, 0.012), M.poly, 0, 0.06, -0.06);
+    B.add(BOX(0.008, 0.004, 0.26), M.yellowDim, 0, 0.079, -0.06);
     for (const sx of [-1, 1]) {
-      B.add(RB(0.012, 0.05, 0.2, 0.005), M.yellow, sx * 0.046, -0.005, -0.08);
+      B.add(RB(0.01, 0.05, 0.2, 0.004), M.poly, sx * 0.046, -0.005, -0.08);
+      B.add(BOX(0.004, 0.012, 0.16), M.yellow, sx * 0.0515, -0.005, -0.08);
       B.add(RB(0.016, 0.03, 0.34, 0.006), M.gun, sx * 0.024, 0.006, -0.38);
-      B.add(RB(0.02, 0.02, 0.05, 0.006), M.yellowPaint, sx * 0.024, 0.006, -0.55);
+      B.add(RB(0.02, 0.02, 0.05, 0.006), M.metal, sx * 0.024, 0.006, -0.55);
     }
-    B.add(CYL(0.012, 0.012, 0.26, 10), M.yellow, 0, 0.006, -0.4, Math.PI / 2);
+    B.add(CYL(0.008, 0.008, 0.26, 10), M.yellow, 0, 0.006, -0.4, Math.PI / 2);
     for (let i = 0; i < 3; i++) B.add(TOR(0.032, 0.004, 6, 18), M.yellowDim, 0, 0.006, -0.3 - i * 0.08);
     for (let i = 0; i < 5; i++) B.add(BOX(0.1, 0.03, 0.007), M.poly, 0, 0.09, 0.0 + i * 0.022);
     B.add(RB(0.05, 0.14, 0.07, 0.015), M.poly, 0, -0.11, 0.03, -0.28);
     B.add(RB(0.06, 0.08, 0.17, 0.02), M.poly, 0, -0.015, 0.21);
-    B.add(BOX(0.062, 0.012, 0.12), M.yellowPaint, 0, 0.03, 0.21);
+    B.add(BOX(0.063, 0.004, 0.012), M.yellowDim, 0, 0.0, 0.25);
     MB.add(RB(0.03, 0.06, 0.12, 0.008), M.gun, 0, 0, 0);
     MB.add(BOX(0.032, 0.03, 0.08), M.yellow, 0, 0.0, 0);
-    extra = holoSight(B, M, 0.135, -0.05, M.yellow, 0.048, 'bars', M.yellow);
+    extra = floatingDot(B, M, 0.135, -0.05, M.yellow, 'bars', M.yellow);
     ud.sight.set(0, 0.135, -0.06); ud.zoom = 1.6; ud.magRest = new THREE.Vector3(-0.06, -0.005, -0.07); ud.cell = true;
     ud.muzzle.set(0, 0.006, -0.56);
   }

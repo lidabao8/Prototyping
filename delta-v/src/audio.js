@@ -70,7 +70,11 @@ export class Audio {
       case 'impact': this.burst({ freq: 200, dur: 0.3, gain: 0.5, tone: 50, toneDur: 0.25, dist }); break;
       case 'clank': this.burst({ freq: 1200, q: 6, type: 'bandpass', dur: 0.15, gain: 0.3, dist }); break;
       case 'reload': this.burst({ freq: 2500, q: 8, type: 'bandpass', dur: 0.06, gain: 0.25 }); break;
-      case 'empty': this.beep(300, 0.04, 0.1); break;
+      case 'magout': this.burst({ freq: 1800, q: 9, type: 'bandpass', dur: 0.05, gain: 0.3 }); break;
+      case 'magin': this.burst({ freq: 900, q: 6, type: 'bandpass', dur: 0.08, gain: 0.45 }); setTimeout(() => this.burst({ freq: 2600, q: 10, type: 'bandpass', dur: 0.03, gain: 0.25 }), 60); break;
+      case 'rack': this.burst({ freq: 1400, q: 7, type: 'bandpass', dur: 0.06, gain: 0.35 }); setTimeout(() => this.burst({ freq: 1100, q: 7, type: 'bandpass', dur: 0.07, gain: 0.4 }), 110); break;
+      case 'shell': this.burst({ freq: 2000, q: 8, type: 'bandpass', dur: 0.04, gain: 0.25 }); break;
+            case 'empty': this.beep(300, 0.04, 0.1); break;
       case 'grab': this.burst({ freq: 700, q: 4, type: 'bandpass', dur: 0.12, gain: 0.35 }); break;
       case 'push': this.burst({ freq: 400, dur: 0.18, gain: 0.3 }); break;
       case 'warn': this.beep(660, 0.1, 0.1, 'sawtooth'); break;
