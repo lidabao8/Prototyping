@@ -29,7 +29,7 @@ export const ACTIONS = [
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false };
-const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, gfx: { preset: 'high', ...PRESETS.high } };
+const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
 const MAP_WEIGHTS = {
@@ -115,6 +115,7 @@ class Game {
     this.state = 'menu';
     this.world = new World(this.scene, this.settings.map);
     this.gfx = new Graphics(this.renderer, this.scene, this.camera);
+    this.gfx.onResize = () => this.resize();
     this.fx = new Effects(this.scene);
     this.audio = new Audio();
     this.audio.setVolume(this.settings.volume);
@@ -284,6 +285,7 @@ class Game {
       $(id).addEventListener('change', () => { g[k] = Number($(id).value); changed(); });
     }
     $('gDmg').addEventListener('change', () => { this.settings.dmgNumbers = $('gDmg').checked; this.saveSettings(); });
+    if ($('gDyn')) { $('gDyn').checked = g.dynamic !== false; $('gDyn').addEventListener('change', () => { g.dynamic = $('gDyn').checked; this.saveSettings(); }); }
     this.syncGraphicsUI = sync;
     sync();
   }
@@ -945,12 +947,15 @@ class Game {
     let dt = (now - this.last) / 1000;
     this.last = now;
     if (!(dt > 0)) dt = 0;
+    if (this.state === 'playing' || this.state === 'ending') this.gfx.adapt(dt, this.settings.gfx.dynamic !== false);
     dt = Math.min(dt, 0.05);
     this.tick(dt);
   }
 
   tick(dt) {
     this.frameDt = dt;
+    this.planBudget = 2;
+    if (this.world) this.world.expBudget = 300;
     if (this.state === 'playing') {
       this.time += dt;
       this.matchTime += dt;

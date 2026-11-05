@@ -36,7 +36,7 @@ export class Bot {
     this.path = null;
     this.goal = null; this.goalNode = -1;
     this.goalT = 0;
-    this.nextPercept = 0; this.nextThink = 0; this.nextPull = 0;
+    this.nextPercept = Math.random() * 0.1; this.nextThink = this.game.time + Math.random() * 0.3; this.nextPull = 0;
     this.jink = new THREE.Vector3(); this.jinkT = 0;
     this.burst = 0; this.burstPause = 0;
     this.combatPosT = 0;
@@ -245,6 +245,9 @@ export class Bot {
 
   planGoal() {
     const g = this.game, s = this.s, w = g.world, t = g.time;
+    // a couple of plans per frame at most: the rest keep their current path and try next think
+    if ((g.planBudget || 0) <= 0) { if (!this.goal) this.goalT = t; return; }
+    g.planBudget--;
     this.goalT = t + 3 + Math.random() * 2;
     let node = -1;
     if (this.state === 'engage' && this.target) node = this.pickCombatNode(this.target);
@@ -259,20 +262,20 @@ export class Bot {
     const threats = this.threatPositions();
     const enemy = 1 - s.team;
     const useThreats = threats.length && this.state !== 'engage';
-    this.path = w.findPath(s.pos, node, (nd) => (w.inSpawn(nd.pos, enemy) ? 400 : 0) + (useThreats ? this.exposure(nd.pos, threats) * 6 : 0));
+    this.path = w.findPath(s.pos, node, (nd) => (w.inSpawn(nd.pos, enemy) ? 400 : 0) + (useThreats ? this.exposure(nd) * 6 : 0));
     this.coast = false;
   }
 
   threatPositions() {
+    // the team's shared callouts: every bot plans against the same picture (and shares the exposure cache)
     const out = [];
-    for (const k of this.known.values()) if (this.game.time - k.t < 6) out.push(k.pos);
+    for (const it of this.game.intel[this.s.team].values()) if (this.game.time - it.t < 6 && it.e.alive) out.push(it.pos);
     return out;
   }
 
-  exposure(p, threats) {
-    let n = 0;
-    for (const tp of threats) if (tp.distanceToSquared(p) < 120 * 120 && this.game.world.los(p, tp, true)) n++;
-    return n;
+  /** Nav node -> number of known threats with line of sight (team cache). */
+  exposure(nd) {
+    return this.game.world.exposureOf(nd.i, this.s.team, this.threatPositions(), this.game.time);
   }
 
   candidates(center, r, max = 40) {
@@ -317,7 +320,7 @@ export class Bot {
       const tUp = _v2.set(0, 1, 0).applyQuaternion(tgt.quat);
       score -= Math.abs(off.dot(tUp)) * 6;
       score -= Math.abs(nd.pos.y - s.pos.y) > 5 ? 1.5 : 0;
-      score += (this.exposure(nd.pos, threats) - 1) * 8;
+      score += (this.exposure(nd) - 1) * 8;
       score += this.teammatePenalty(nd.pos);
       if (this.role === 'flanker') {
         // prefer angles that differ from the team's line of fire
@@ -338,7 +341,7 @@ export class Bot {
     const threats = this.threatPositions();
     let best = -1, bestScore = Infinity;
     for (const nd of this.candidates(s.pos, r, 40)) {
-      let score = nd.pos.distanceTo(s.pos) * 0.4 + this.exposure(nd.pos, threats) * 25;
+      let score = nd.pos.distanceTo(s.pos) * 0.4 + this.exposure(nd) * 25;
       if (preferSurf && !nd.surf) score += 12;
       score += this.teammatePenalty(nd.pos) * 0.5 + Math.random() * 2;
       if (score < bestScore) { bestScore = score; best = nd.i; }
@@ -387,7 +390,7 @@ export class Bot {
     const s = this.s, g = this.game, t = g.time;
     if (!s.alive) return;
     if (t >= this.nextPercept) { this.nextPercept = t + 0.1; this.perceive(); }
-    if (t >= this.nextThink) { this.nextThink = t + 0.3; this.think(); }
+    if (t >= this.nextThink) { this.nextThink = t + 0.27 + Math.random() * 0.08; this.think(); }
     if (this.target && (!this.target.alive || !this.known.get(this.target.id) || !this.known.get(this.target.id).visible)) {
       this.target = null;
     }

@@ -6,7 +6,7 @@ const HX = 72, HY = 36, HZ = 36;
 
 export const MAPS = {
   hangar: { name: 'Hangar Bay', desc: 'Enclosed 144 m hangar. Walls everywhere to push off.', enclosed: true, bounds: [72, 36, 36], navStep: [6, 7.5], navR: 10.5, spawnX: 64 },
-  spin: { name: 'Spin Drum', desc: 'Rotating drum station: 0.5 g on the rim, zero-g at the axis. Walk the floor, fly the core.', enclosed: true, drum: 36, omega: 0.3727, bounds: [70, 36, 36], navStep: [6, 7], navR: 10.5, spawnX: 64 },
+  spin: { name: 'Spin Drum', desc: 'Rotating drum station at 2.25 rpm: 0.2 g on the rim, fading to zero at the axis. Walk the floor, jump into flight, fly the core.', enclosed: true, drum: 36, omega: 0.2357, bounds: [70, 36, 36], navStep: [6, 7], navR: 10.5, spawnX: 64 },
   yard: { name: 'Derelict Yard', desc: 'Open orbit, 300 m across. No walls: drift too far and your suit runs out of luck.', enclosed: false, bounds: [150, 70, 70], navStep: [11, 11], navR: 19.5, spawnX: 124 },
 };
 
@@ -1000,39 +1000,65 @@ export class World {
   }
 
   /** A* over the nav graph; returns array of Vector3 (excluding start). */
+  /** A* over the nav graph; returns array of Vector3 (excluding start). Buffers are reused between searches. */
   findPath(from, goalIdx, avoid = null) {
     const start = this.nearestNode(from);
     if (start < 0 || goalIdx < 0) return null;
     const N = this.nav.length;
-    const g = new Float32Array(N).fill(Infinity);
-    const came = new Int32Array(N).fill(-1);
-    const closed = new Uint8Array(N);
+    if (!this._astar || this._astar.g.length !== N) this._astar = { g: new Float32Array(N), came: new Int32Array(N), seen: new Uint32Array(N), closed: new Uint32Array(N), stamp: 0, heap: new MinHeap() };
+    const A = this._astar;
+    const st = ++A.stamp;
+    const G = (i) => (A.seen[i] === st ? A.g[i] : Infinity);
     const goal = this.nav[goalIdx].pos;
-    const heap = new MinHeap();
-    g[start] = 0; heap.push(start, start === goalIdx ? 0 : this.nav[start].pos.distanceTo(goal));
-    let iter = 0;
-    while (heap.size && iter++ < 6000) {
+    const heap = A.heap; heap.a.length = 0;
+    A.seen[start] = st; A.g[start] = 0; A.came[start] = -1;
+    heap.push(start, this.nav[start].pos.distanceTo(goal));
+    let iter = 0, found = start === goalIdx;
+    while (heap.size && iter++ < 4000) {
       const cur = heap.pop();
-      if (cur === goalIdx) break;
-      if (closed[cur]) continue;
-      closed[cur] = 1;
+      if (cur === goalIdx) { found = true; break; }
+      if (A.closed[cur] === st) continue;
+      A.closed[cur] = st;
       const nd = this.nav[cur];
+      const gc = A.g[cur];
       for (let k = 0; k < nd.nb.length; k++) {
         const j = nd.nb[k];
-        if (closed[j]) continue;
+        if (A.closed[j] === st) continue;
         let c = nd.cost[k];
         if (avoid) c += avoid(this.nav[j]);
-        const ng = g[cur] + c;
-        if (ng < g[j]) { g[j] = ng; came[j] = cur; heap.push(j, ng + this.nav[j].pos.distanceTo(goal)); }
+        const ng = gc + c;
+        if (ng < G(j)) { A.seen[j] = st; A.g[j] = ng; A.came[j] = cur; heap.push(j, ng + this.nav[j].pos.distanceTo(goal) * 1.15); }
       }
     }
-    if (came[goalIdx] < 0 && goalIdx !== start) return null;
+    if (!found) return null;
     const path = [];
     let c = goalIdx;
-    while (c >= 0 && c !== start) { path.push(this.nav[c].pos.clone()); c = came[c]; }
+    while (c >= 0 && c !== start) { path.push(this.nav[c].pos.clone()); c = A.came[c]; }
     path.reverse();
     if (!path.length) path.push(this.nav[goalIdx].pos.clone());
     return path;
+  }
+
+  /**
+   * How many of a team's known threats can see nav node i. Shared by every bot on the team and
+   * refreshed once a second, so the raycasts behind it are paid once instead of per bot per search.
+   */
+  exposureOf(i, team, threats, now) {
+    this._exp = this._exp || [null, null];
+    let c = this._exp[team];
+    if (!c || c.vals.length !== this.nav.length) c = this._exp[team] = { vals: new Int8Array(this.nav.length), t: -99, threats: [] };
+    if (now - c.t > 1) { c.vals.fill(-1); c.t = now; c.threats = threats.map((p) => p.clone()); }
+    let v = c.vals[i];
+    if (v < 0) {
+      // spread the raycasts over frames: unknown nodes count as unexposed until their turn
+      if ((this.expBudget || 0) <= 0) return 0;
+      this.expBudget--;
+      v = 0;
+      const p = this.nav[i].pos;
+      for (const tp of c.threats) if (tp.distanceToSquared(p) < 120 * 120 && this.los(p, tp, true)) v++;
+      c.vals[i] = v;
+    }
+    return v;
   }
 
   makeSpawns(side) {

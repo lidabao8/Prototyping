@@ -8,11 +8,11 @@ Two squads of EVA soldiers fight in orbit, on one of three maps:
 
 ### Spin Drum
 
-The station is a 72 m-diameter, 140 m-long drum spinning about its long axis at Ω ≈ 0.37 rad/s. The game runs in the drum's rotating frame, so the station stands still and the stars wheel past two window bands.
+The station is a 72 m-diameter, 140 m-long drum spinning about its long axis at 2.25 rpm (Ω ≈ 0.24 rad/s), within the range real station designs consider comfortable. The game runs in the drum's rotating frame, so the station stands still and the stars wheel past two window bands.
 
-* **Gravity:** centrifugal acceleration Ω²r points outward from the axis. It's about 0.5 g on the rim and fades to zero at the centre.
+* **Gravity:** centrifugal acceleration Ω²r points outward from the axis. It's about 0.2 g on the rim and fades to zero at the centre. The RCS can climb against it.
 * **Floating:** RCS works as everywhere else, but you also feel the centrifugal pull and Coriolis drift (−2Ω×v). A slow fall curves sideways, and grenades arc. Bullets fly straight, as a gameplay simplification.
-* **Landing:** touch the floor feet-down and you switch to normal walking: WASD, Space to jump, mouse look with head pitch, and the RCS shuts off. Legs absorb landings up to 11 m/s. Falling all the way from the axis lands at about 13 m/s, so brake on the way down. Landing on your back or head just bounces you.
+* **Landing:** touch the floor feet-down and you switch to normal walking: WASD, mouse look with head pitch, and the RCS shuts off. Jump (Space) to push off the floor straight into flight mode, with the RCS back online; you only land again when coming down onto the floor. Legs absorb landings up to 11 m/s, and a fall from the axis arrives at about 8.5 m/s. Landing on your back or head just bounces you.
 * **Layout:** cover stands on the floor in four streets around the drum (low walls, crates, two-storey blocks). The zero-g core has a central hub, spokes, an axial truss, floating low-gravity platforms and crates.
 * **Bots:** they walk the floor (jumping when their path climbs) and fly the core, cancelling the spin forces with their jets as far as thrust allows. There is no "up", and nothing gives you momentum for free: every burn, shot, push-off and suit leak changes your trajectory.
 
@@ -28,6 +28,7 @@ npm run build      # or: npm run watch / npm run serve (http://localhost:8081)
 * **The suit has 24 RCS nozzles**: four thruster quads with six nozzles each, at the corners of the backpack. Every nozzle applies its force at its own position. Net force and torque are summed as $\vec a = \tfrac{1}{m}\sum \vec F_i$ and $\vec\tau = \sum \vec r_i \times \vec F_i$.
 * **Rotation uses Euler's equations** with a non-symmetric inertia tensor: $\dot{\vec\omega} = I^{-1}(\vec\tau - \vec\omega \times I\vec\omega)$. Tumbling about the intermediate axis is possible.
 * **Nozzles are on/off.** Player keys fire them at full thrust. The flight computer's assists drive them with pulse-width modulation.
+* **Each quad has its own pressure reserve.** A fresh burst runs at 1.5× nominal thrust and tapers to 0.65× after about 1.5 s of sustained firing. Pressure drains with flow and refills more slowly, so pulsing a key averages less thrust than holding it. Each quad's pressure shows beside it in the suit schematic.
 * **Fuel is cold-gas N₂** (10 kg, $v_e$ = 700 m/s). The HUD shows Δv in m/s from the rocket equation, $\Delta v = v_e\ln\frac{m_0}{m_f}$. The gas starts refilling 0.6 s after the jets go quiet: about 1.1 kg/s in free flight, 2.2 kg/s while anchored. Infinite gas is a menu option.
 * **Damage matters.** Hits near a thruster quad can destroy it. After that, translating also produces torque, and the assist burns extra gas fighting the spin. Suit breaches vent gas, which pushes and spins you, and drains O₂.
 * **Mass matters.** Weapons and gas count towards your mass. Holding a cargo pod and thrusting pushes the combined 300+ kg.
@@ -80,7 +81,7 @@ There are also options for infinite gas and enemy outlines.
 
 ## Graphics
 
-**Quality presets:** Low, Medium, High and Ultra, plus individual tiers and sliders:
+**Quality presets:** Low, Medium (default), High and Ultra, plus individual tiers and sliders:
 
 * Render scale (50–150%).
 * Sun shadows (Off / Low / High / Ultra), which follow you so they stay crisp on the big map.
@@ -89,6 +90,9 @@ There are also options for infinite gas and enemy outlines.
 * Reflection strength (0–150%).
 * Particle density (20–100%).
 * Exposure.
+* Dynamic resolution (on by default): drops the render scale in steps while frames run slow, and climbs back when there's headroom.
+
+**Performance:** bot path planning shares a team-wide line-of-sight cache, reuses its search buffers, is limited to two plans per frame, and caps raycasts per frame. Bots' thinking is staggered. This removed the 150–280 ms hitches that caused stutter. Particle uploads only send live particles.
 
 **Models and textures:**
 

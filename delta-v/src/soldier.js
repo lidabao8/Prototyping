@@ -13,7 +13,10 @@ export const MODE_DESC = [
   'Attitude hold + auto-burn to match the velocity of the station or a locked target.',
 ];
 
-export const NOZZLE_F = 110;     // N per nozzle
+export const NOZZLE_F = 110;     // N per nozzle (nominal)
+// Each thruster quad is fed from a small plenum: a fresh burst runs hot (1.5x), sustained firing tapers to 0.65x.
+// Pressure drains with flow and refills slowly, so pulsing the key can't beat holding it.
+export const PLENUM = { max: 1.5, min: 0.65, drain: 0.9, refill: 0.5 };
 export const VE = 700;           // m/s cold-gas exhaust velocity
 export const GAS_MAX = 10;       // kg of N2
 export const BASE_MASS = 112;    // kg (person + suit, without weapons or gas)
@@ -164,7 +167,7 @@ export class Soldier {
     this.holdQ = null;
     this.grab = null;
     this.leaks = [];
-    this.towers = TOWERS.map(() => ({ hp: 30, dead: false }));
+    this.towers = TOWERS.map(() => ({ hp: 30, dead: false, press: 1 }));
     this.weapons = (this.loadout || ['rifle', 'shotgun']).map((id) => new WeaponState(WEAPONS[id] || WEAPONS.rifle));
     this.cur = 0; this.switchT = 0;
     this.grenades = GRENADE.count;
@@ -359,16 +362,29 @@ export class Soldier {
       for (let k = 0; k < 6; k++) sum += th[b + k];
     }
     if (sum <= 0) return sum;
-    let need = sum * NOZZLE_F / VE * dt;
+    // plenum pressure sets each quad's thrust this instant; gas use follows the actual force
+    const fac = this._fac || (this._fac = new Float32Array(4));
+    let need = 0;
+    for (let i = 0; i < 4; i++) {
+      const st = this.towers[i];
+      fac[i] = PLENUM.min + (PLENUM.max - PLENUM.min) * st.press;
+      let ti = 0; for (let k = 0; k < 6; k++) ti += th[i * 6 + k];
+      need += ti * NOZZLE_F * fac[i] / VE * dt;
+    }
     let scale = 1;
     if (this.game.rules.infiniteGas) need = 0;
     if (need > this.gas) { scale = this.gas / need; need = this.gas; }
     this.gas -= need;
     if (scale < 1) for (let k = 0; k < 24; k++) th[k] *= scale;
     for (let i = 0; i < 4; i++) {
+      let ti = 0; for (let k = 0; k < 6; k++) ti += th[i * 6 + k];
+      const st = this.towers[i];
+      st.press = Math.max(0, st.press - PLENUM.drain * ti * dt);
+    }
+    for (let i = 0; i < 4; i++) {
       const tw = TOWERS[i];
       _f.set(0, 0, 0);
-      for (let k = 0; k < 6; k++) { const t = th[i * 6 + k]; if (t > 0) _f.addScaledVector(NOZ_DIR[k], t * NOZZLE_F); }
+      for (let k = 0; k < 6; k++) { const t = th[i * 6 + k]; if (t > 0) _f.addScaledVector(NOZ_DIR[k], t * NOZZLE_F * fac[i]); }
       F.add(_f);
       T.add(_v2.crossVectors(tw.pos, _f));
     }
@@ -464,6 +480,7 @@ export class Soldier {
   tryLand(world) {
     if (this.jumpGrace > 0) return;
     const up = world.upAt(this.pos, _w1);
+    if (this.vel.dot(up) > 0.8) return; // still rising off the floor: stay in flight
     const gmag = world.gravityAt(this.pos, _g1).length();
     if (gmag < 0.8) return;
     const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.3, true);
@@ -488,7 +505,9 @@ export class Soldier {
     this.walking = false;
     this.quat.multiply(_q.setFromAxisAngle(_AX, this.aimPitch)).normalize();
     this.aimPitch = 0; this.aimYaw = 0;
-    this.jumpGrace = 0.35;
+    this.jumpGrace = this.jumped ? 0.6 : 0.35;
+    if (this.jumped && this.isPlayer) this.game.hud.message('FLIGHT MODE – RCS ONLINE', '#9fe8ff', 1.2);
+    this.jumped = false;
   }
 
   /** Walking on the drum floor: no RCS, legs and friction do the work. */
@@ -519,7 +538,7 @@ export class Soldier {
     let vn = this.vel.dot(up);
     // jump
     const jump = this.walkTarget ? this.walkJump : this.ctrl.move.y > 0.5;
-    if (jump && this.jumpGrace <= 0) { vn = 5; this.walkJump = false; }
+    if (jump && this.jumpGrace <= 0) { vn = 4.5; this.walkJump = false; this.jumped = true; }
     this.vel.copy(vt).addScaledVector(up, vn);
     if (vn > 1.5) { this.pos.addScaledVector(this.vel, dt); this.leaveWalk(); return; }
     // stand at hip height on the floor
@@ -606,6 +625,7 @@ export class Soldier {
     this.grenadeCool -= dt; this.meleeCool -= dt;
     this.meleeT = Math.max(0, this.meleeT - dt);
     this.jumpGrace = Math.max(0, this.jumpGrace - dt);
+    for (const st of this.towers) st.press = Math.min(1, st.press + PLENUM.refill * (1 - st.press) * dt);
     this.adsAmt += ((this.ads && !this.grab ? 1 : 0) - this.adsAmt) * Math.min(1, dt * 9);
     if (this.throwT > 0) {
       const before = this.throwT;

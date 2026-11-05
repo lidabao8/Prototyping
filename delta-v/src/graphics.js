@@ -20,6 +20,7 @@ export function normalizeGfx(g) {
   if (out.aa === true) out.aa = 4; if (out.aa === false) out.aa = 0;
   if (out.env === true) out.env = 1; if (out.env === false) out.env = 0;
   for (const k of ['scale', 'shadows', 'bloom', 'aa', 'particles', 'env', 'exposure']) out[k] = Number(out[k]) || 0;
+  if (out.dynamic == null) out.dynamic = true;
   if (!out.exposure) out.exposure = 1.05;
   return out;
 }
@@ -37,10 +38,12 @@ export class Graphics {
   }
 
   apply(cfg, world) {
+    if (world) this.world = world;
     const prevShadows = this.cfg.shadows;
     this.cfg = { ...cfg };
     const r = this.renderer;
-    const pr = Math.max(0.4, Math.min(2, (window.devicePixelRatio || 1) * cfg.scale));
+    this.dyn = this.dyn || 1;
+    const pr = Math.max(0.4, Math.min(2, (window.devicePixelRatio || 1) * cfg.scale * this.dyn));
     r.setPixelRatio(pr);
     // shadows
     r.shadowMap.enabled = cfg.shadows > 0;
@@ -54,7 +57,7 @@ export class Graphics {
     } else this.scene.environment = null;
     r.toneMappingExposure = cfg.exposure || 1.05;
     // rebuild post chain only when its structure changes; bloom strength alone is a live tweak
-    const key = `${cfg.bloom > 0}|${cfg.aa}|${cfg.scale}`;
+    const key = `${cfg.bloom > 0}|${cfg.aa}|${cfg.scale}|${this.dyn}`;
     if (key !== this.compKey) { this.compKey = key; this.buildComposer(); }
     if (this.bloom) this.bloom.strength = 0.55 * cfg.bloom;
   }
@@ -103,6 +106,21 @@ export class Graphics {
     comp.addPass(new OutputPass());
     this.composer = comp;
     this.resize();
+  }
+
+  /**
+   * Dynamic resolution: watch smoothed frame time; drop render scale in steps while frames run slow,
+   * climb back when there's headroom. Changes at most every 2 s (re-allocating targets isn't free).
+   */
+  adapt(dt, enabled) {
+    this.ema = this.ema == null ? dt : this.ema * 0.95 + dt * 0.05;
+    this.adaptT = (this.adaptT || 0) + dt;
+    if (!enabled) { if (this.dyn !== 1) { this.dyn = 1; this.apply(this.cfg, this.world); } return; }
+    if (this.adaptT < 2) return;
+    let next = this.dyn;
+    if (this.ema > 1 / 45 && this.dyn > 0.55) next = Math.max(0.55, this.dyn - 0.1);
+    else if (this.ema < 1 / 70 && this.dyn < 1) next = Math.min(1, this.dyn + 0.05);
+    if (next !== this.dyn) { this.dyn = next; this.adaptT = 0; this.apply(this.cfg, this.world); if (this.onResize) this.onResize(); }
   }
 
   resize() {

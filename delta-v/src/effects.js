@@ -89,7 +89,10 @@ class ParticleSet {
     }
     this.n = n;
     this.geo.setDrawRange(0, n);
-    this.aPos.needsUpdate = this.aCol.needsUpdate = this.aSize.needsUpdate = this.aAlpha.needsUpdate = true;
+    // upload only the live particles, not the whole pool
+    for (const [attr, k] of [[this.aPos, 3], [this.aCol, 3], [this.aSize, 1], [this.aAlpha, 1]]) {
+      attr.clearUpdateRanges(); attr.addUpdateRange(0, Math.max(1, n) * k); attr.needsUpdate = true;
+    }
   }
 
   copy(from, to) {

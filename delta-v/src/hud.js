@@ -575,6 +575,10 @@ export class HUD {
       g.fillStyle = 'rgba(6,10,16,0.9)'; g.fillRect(cx - 7, cy - 7, 14, 14);
       g.strokeStyle = col; g.lineWidth = 1.5; g.strokeRect(cx - 7, cy - 7, 14, 14);
       g.fillStyle = col; g.globalAlpha = 0.25; g.fillRect(cx - 7, cy + 7 - 14 * f, 14, 14 * f); g.globalAlpha = 1;
+      // plenum pressure gauge beside the quad (outer side)
+      const px = cx + (tw.pos.x < 0 ? -17 : 14), pr = st.press == null ? 1 : st.press;
+      g.fillStyle = 'rgba(255,255,255,0.1)'; g.fillRect(px, cy - 7, 3, 14);
+      g.fillStyle = pr > 0.5 ? HUD_C : pr > 0.2 ? WARN : DANGER; g.fillRect(px, cy + 7 - 14 * pr, 3, 14 * pr);
       if (st.dead) {
         g.strokeStyle = DANGER; g.beginPath(); g.moveTo(cx - 6, cy - 6); g.lineTo(cx + 6, cy + 6); g.moveTo(cx + 6, cy - 6); g.lineTo(cx - 6, cy + 6); g.stroke();
         return;
@@ -703,9 +707,14 @@ export class HUD {
 
   drawHints(cx, cy) {
     const game = this.game, p = game.player;
+    if (p.walking) {
+      this.text(`${game.keyLabel('up')}: JUMP INTO FLIGHT`, cx, cy + 120, 12, OK, 'center', 700);
+      return;
+    }
     if (p.grab) {
       const c = p.pushCharge;
       const pk = game.settings.binds.pushOff;
+      void 0;
       this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : pk ? `HOLD ${game.keyLabel('pushOff')}: PUSH OFF TOWARDS AIM   ${game.keyLabel('grab')}: RELEASE` : `PUSH OFF IS UNBOUND: SET IT IN CONTROLS   ${game.keyLabel('grab')}: RELEASE`, cx, cy + 120, 13, pk || c > 0 ? OK : WARN, 'center', 700);
       if (p.grab.kind !== 'pod' && !c) this.text('MOVE KEYS: CRAWL ALONG THE SURFACE (NO GAS)', cx, cy + 138, 11, OK, 'center');
       if (p.grab.kind === 'pod' && !c) this.text(`MOVE KEYS: HAUL POD (${(p.mass + p.grab.obj.mass).toFixed(0)} kg combined)`, cx, cy + 138, 11, OK, 'center');
