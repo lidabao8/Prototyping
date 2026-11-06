@@ -5,12 +5,11 @@ import { buildGun, buildSoldier } from './models.js';
 
 export const TEAM_COLORS = [0x3f8cff, 0xff8a2a];
 export const TEAM_NAMES = ['BLUE', 'ORANGE'];
-export const MODES = ['MANUAL', 'RATE DAMP', 'ATT HOLD', 'VEL MATCH'];
+export const MODES = ['MANUAL', 'RATE DAMP', 'AUTO-STOP'];
 export const MODE_DESC = [
   'No assists. Every rotation and stop is your own counter-burn.',
   'Rotation is damped automatically when you stop steering. Linear drift remains.',
-  'Holds your body attitude while you translate (PD controller).',
-  'Attitude hold + auto-burn to match the velocity of the station or a locked target.',
+  'Rate damp + with no movement key held, the jets stop you relative to the map.',
 ];
 
 export const NOZZLE_F = 110;     // N per nozzle (nominal)
@@ -313,7 +312,7 @@ export class Soldier {
       this.holdQ = null;
     } else {
       const wDes = _wDes.set(0, 0, kill ? 0 : rollIn * ROLL_RATE);
-      const holdMode = (mode >= 2 || this.isBot) && !kill && rollIn === 0;
+      const holdMode = this.isBot && !kill && rollIn === 0;
       if (holdMode) {
         if (!this.holdQ && w.lengthSq() < 0.02) this.holdQ = this.quat.clone();
         if (this.holdQ) {
@@ -335,10 +334,10 @@ export class Soldier {
     }
     // translation
     const cmdT = _cmdT.copy(c.move);
-    const autoStop = this.isPlayer && this.game.settings.autoStop;
-    const autoMatch = autoStop || (!manual && (c.brake || (mode === 3 && !this.isBot)));
+    const autoStop = this.isPlayer && mode === 2;
+    const autoMatch = autoStop || (!manual && c.brake);
     if (autoMatch) {
-      // auto-stop always holds still relative to the map; brake / velocity match use the locked target if any
+      // auto-stop holds still relative to the map; the brake matches the locked target if any
       const ref = !autoStop || c.brake ? (this.refTarget && this.refTarget.alive !== false ? this.refTarget.vel : _zero) : _zero;
       const vr = _v.subVectors(this.vel, ref).applyQuaternion(_q.copy(this.quat).invert());
       for (const k of ['x', 'y', 'z']) {

@@ -540,7 +540,7 @@ export class HUD {
       }
     }
     // RCS mode chip above the cluster
-    const mode = `RCS · ${MODES[p.mode]}${this.game.settings.autoStop ? ' · AUTO-STOP' : ''}`;
+    const mode = `RCS · ${MODES[p.mode]}`;
     g.font = `700 11px ${this.font}`;
     const mw = g.measureText(mode).width + 40;
     this.plate(x, y - 28, mw, 22, 6, 'rgba(255,204,77,0.12)', 'rgba(255,204,77,0.4)');

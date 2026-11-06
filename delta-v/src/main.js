@@ -27,11 +27,11 @@ export const ACTIONS = [
   ['mode', 'Cycle RCS mode', 'KeyT'], ['lockRef', 'Lock velocity reference', 'KeyL'], ['grid', 'Reference grid', 'KeyH'], ['board', 'Scoreboard', 'Tab'],
   // newer actions start unbound: assign them under Controls & keybinds
   ['pushOff', 'Push off (hold while holding on)', ''], ['adsToggle', 'Aim down sights (toggle)', ''],
-  ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''], ['autoStop', 'Toggle RCS auto-stop', ''],
+  ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false, thrust: 1 };
-const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, autoStop: false, magBoots: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
+const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, magBoots: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
 const MAP_WEIGHTS = {
@@ -51,7 +51,7 @@ export function keyName(code) {
   const map = { Space: 'Space', ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift', ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'L-Alt', AltRight: 'R-Alt', Tab: 'Tab', CapsLock: 'Caps', Backquote: '`', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: 'Enter', Backspace: 'Bksp' };
   return map[code] || code;
 }
-const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion();
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _vAcc = new THREE.Vector3();
 
 /**
  * Raw input. Keyboard keys use KeyboardEvent.code; mouse buttons are 'Mouse0'..'Mouse4' and the wheel is
@@ -151,6 +151,11 @@ class Game {
     st.binds = { ...DEFAULT_BINDS, ...(saved.binds || {}) };
     st.rules = { ...DEFAULT_RULES, ...(saved.rules || {}) };
     if (!MAPS[st.map]) st.map = 'hangar';
+    // old saves: attitude hold / velocity match are gone; the old auto-stop checkbox becomes the AUTO-STOP mode
+    st.mode = Number(st.mode) || 0;
+    if (saved.autoStop) st.mode = 2;
+    else if (st.mode > 1) st.mode = 1;
+    delete st.autoStop; delete st.binds.autoStop;
     st.gfx = normalizeGfx({ ...DEFAULTS.gfx, ...(saved.gfx || {}) });
     if (!Array.isArray(st.loadout) || st.loadout.length !== 2 || !st.loadout.every((id) => WEAPONS[id]) || st.loadout[0] === st.loadout[1]) st.loadout = [...DEFAULTS.loadout];
     return st;
@@ -255,7 +260,6 @@ class Game {
       th.addEventListener('change', () => { st.rules.thrust = Number(th.value) || 1; this.saveSettings(); if (this.refreshSummary) this.refreshSummary(); });
     }
     chk('optOutline', () => st.outlines, (v) => { st.outlines = v; });
-    chk('optAutoStop', () => st.autoStop, (v) => { st.autoStop = v; });
     chk('optMagBoots', () => st.magBoots !== false, (v) => { st.magBoots = v; });
     this.buildBindUI();
     this.setupLoadoutUI();
@@ -1007,12 +1011,6 @@ class Game {
       this.hud.message(MODE_DESC[p.mode], '#9fe8ff', 3);
       this.audio.play('mode');
     }
-    if (this.pressedAct('autoStop')) {
-      this.settings.autoStop = !this.settings.autoStop; this.saveSettings();
-      const el = document.getElementById('optAutoStop'); if (el) el.checked = this.settings.autoStop;
-      this.hud.message(this.settings.autoStop ? 'RCS AUTO-STOP ON – HOLDS STILL RELATIVE TO THE MAP' : 'RCS AUTO-STOP OFF', '#ffcc4d', 2);
-      this.audio.play('mode');
-    }
     if (this.pressedAct('grid')) { this.showGrid = !this.showGrid; this.hud.message(this.showGrid ? 'REFERENCE GRID ON' : 'REFERENCE GRID AUTO', '#9fe8ff', 1.5); }
     if (this.pressedAct('lockRef')) {
       const info = this.hud.aimInfo;
@@ -1202,20 +1200,26 @@ class Game {
     let magVis = true;
     const belt = new THREE.Vector3(-0.12, -0.5, -0.22);
     let shellVis = false, magSpin = 0, carry = false;
+    // shell-by-shell loading keeps the gun tipped across rounds and eases back after the last one
+    const loadingShells = w.reloadT > 0 && def.perShell;
+    this.vmShellTilt = (this.vmShellTilt || 0) + ((loadingShells ? 1 : 0) - (this.vmShellTilt || 0)) * (1 - Math.exp(-dt * 7));
+    if (def.perShell && this.vmShellTilt > 1e-3) {
+      const gyro = ud.cartridge === 'rocket', tilt = this.vmShellTilt;
+      rot.z += (gyro ? -0.5 : 0.38) * tilt; rot.x += (gyro ? 0.2 : 0.14) * tilt; pos.y -= 0.02 * tilt;
+    }
     if (w.reloadT > 0 && def.reload > 0) {
       const r = 1 - w.reloadT / def.reload;
       if (def.perShell) {
         // round-by-round: fetch a cartridge from the belt, line it up with the port, push it in
         const gyro = ud.cartridge === 'rocket';
-        const tilt = sm(0, 0.15, r);
-        rot.z += (gyro ? -0.5 : 0.38) * tilt; rot.x += (gyro ? 0.2 : 0.14) * tilt; pos.y -= 0.02 * tilt;
         const portL = ud.port || new THREE.Vector3(0, -0.06, -0.05);
         const port = this.gunPoint(gun, portL, pos, rot);
         const approach = this.gunPoint(gun, portL.clone().add(gyro ? new THREE.Vector3(0.09, -0.02, 0.02) : new THREE.Vector3(0, -0.07, 0.05)), pos, rot);
-        const pouch = belt.clone().add(new THREE.Vector3(0.05, 0.06, -0.04));
-        handOverride = r < 0.38 ? pouch.clone().lerp(approach, sm(0.12, 0.38, r))
-          : r < 0.6 ? approach.clone().lerp(port, sm(0.4, 0.58, r))
-          : port.clone().lerp(pouch, sm(0.68, 1, r) * 0.8);
+        // rounds ride in a chest carrier just under the gun, so each trip is short and unhurried
+        const pouch = belt.clone().add(new THREE.Vector3(0.07, 0.2, -0.03));
+        handOverride = r < 0.38 ? pouch.clone().lerp(approach, sm(0.04, 0.38, r))
+          : r < 0.6 ? approach.clone().lerp(port, sm(0.38, 0.6, r))
+          : port.clone().lerp(pouch, sm(0.62, 1, r));
         shellVis = r > 0.1 && r < 0.6;
         // drum indexes one chamber per rocket loaded
         if (gyro) magSpin = -(w.mag + sm(0.6, 0.8, r)) * Math.PI * 2 / 5;
@@ -1228,7 +1232,8 @@ class Game {
         else magOff.z = 0.36 * (1 - sm(0.55, 0.85, r));
         if (this.prevReloadR != null && this.prevReloadR < 0.3 && r >= 0.3) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, 0.3, 1.4));
         const breech = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
-        handOverride = r < 0.3 ? null : r < 0.55 ? belt.clone().lerp(breech, sm(0.42, 0.55, r)) : r < 0.88 ? breech : null;
+        const guard = this.gunPoint(gun, ud.hand, pos, rot);
+        handOverride = r < 0.3 ? guard.clone().lerp(belt, sm(0.12, 0.3, r)) : r < 0.55 ? belt.clone().lerp(breech, sm(0.42, 0.55, r)) : r < 0.86 ? breech : breech.clone().lerp(guard, sm(0.86, 0.98, r));
         carry = r > 0.36 && r < 0.55;
       } else {
         // box magazines: tilt to show the well, thumb the release, the old mag drops and floats off,
@@ -1244,8 +1249,9 @@ class Game {
         const pouch = belt.clone().add(new THREE.Vector3(0.04, 0.06, -0.04));
         const below = this.gunPoint(gun, ud.magRest.clone().add(new THREE.Vector3(0, -0.14, 0)), pos, rot);
         const cup = new THREE.Vector3(0, -0.035, 0.01); // hand cups the base of the mag
-        handOverride = r < 0.1 ? null : r < 0.24 ? magW.clone().add(cup) : r < 0.4 ? magW.clone().lerp(pouch, sm(0.24, 0.4, r))
-          : r < 0.56 ? pouch.clone().lerp(below.clone().add(cup), sm(0.42, 0.56, r)) : r < 0.8 ? magW.clone().add(cup) : null;
+        const guard = this.gunPoint(gun, ud.hand, pos, rot);
+        handOverride = r < 0.1 ? guard.clone().lerp(magW.clone().add(cup), sm(0.02, 0.1, r)) : r < 0.24 ? magW.clone().add(cup) : r < 0.4 ? magW.clone().lerp(pouch, sm(0.24, 0.4, r))
+          : r < 0.56 ? pouch.clone().lerp(below.clone().add(cup), sm(0.42, 0.56, r)) : r < 0.8 ? magW.clone().add(cup) : magW.clone().add(cup).lerp(guard, sm(0.8, 0.92, r));
         carry = r > 0.42 && r < 0.56;
         if (r > 0.78 && r < 0.86) pos.y += 0.016 * bell((r - 0.78) / 0.08); // slap home
         // racking the charging handle after an empty reload
@@ -1318,7 +1324,20 @@ class Game {
     this.vmMuzzleCam = this.gunPoint(gun, ud.muzzle, pos, rot);
     // arms
     const gripW = this.gunPoint(gun, ud.grip, pos, rot);
-    const handW = handOverride || gripHand || this.gunPoint(gun, ud.pump ? ud.hand.clone().add(new THREE.Vector3(0, 0, magOff.z)) : ud.hand, pos, rot);
+    const handBase = this.gunPoint(gun, ud.pump ? ud.hand.clone().add(new THREE.Vector3(0, 0, magOff.z)) : ud.hand, pos, rot);
+    const handTgt = handOverride || gripHand || handBase;
+    // smooth the hand's offset from its resting spot on the gun: the gun's own motion stays crisp,
+    // but any jump in where the hand is meant to be (phase changes, cancelled reloads, swaps) is eased
+    // (critically damped spring: starts and stops gently, no first-frame lurch)
+    if (!this.vmHandOff) { this.vmHandOff = new THREE.Vector3(); this.vmHandVel = new THREE.Vector3(); }
+    const want = _v2.subVectors(handTgt, handBase);
+    const om = p.throwT > 0 ? 30 : 17, n = Math.max(1, Math.ceil(dt / 0.008)), h = Math.min(dt, 0.1) / n;
+    for (let i = 0; i < n; i++) {
+      const acc = _vAcc.subVectors(want, this.vmHandOff).multiplyScalar(om * om).addScaledVector(this.vmHandVel, -2 * om);
+      this.vmHandVel.addScaledVector(acc, h);
+      this.vmHandOff.addScaledVector(this.vmHandVel, h);
+    }
+    const handW = handBase.clone().add(this.vmHandOff);
     this.placeArm(this.vmArmR, gripW, new THREE.Vector3(0.36, -0.62, 0.18));
     this.placeArm(this.vmArmL, handW, new THREE.Vector3(-0.4, -0.58, 0.05));
     this.vmNade.visible = nadeVis;

@@ -68,7 +68,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 ### Mag boots, auto-stop and holding on
 
 * **Mag boots** (Settings, on by default): touch any surface feet-first, on any map, and the boots lock on. You walk it like a floor (WASD, mouse look with head pitch), with the RCS off. Walking into a wall tips you onto it, so inside corners carry you up walls and onto ceilings. Space jumps off into flight. The Spin Drum floor works the same way. When the boots lock on, or you step onto a wall, the view eases round to the new 'up' with a small knee-dip instead of snapping.
-* **RCS auto-stop** (Settings, or bind *Toggle RCS auto-stop*): whenever no movement key is held, the jets bring you to a stop relative to the map, in any assist mode. Holding the brake still matches a locked target.
+* **RCS auto-stop** is the third assist mode (cycle with T, or pick it under Play → Flight computer): whenever no movement key is held, the jets bring you to a stop relative to the map. Holding the brake still matches a locked target.
 * **Holding on:**
   * Your hand visibly reaches out and grips the surface (bots' arms too), and the gun goes one-handed.
   * Crawling is view-relative: W/S move "forward" along the surface as you see it. Looking straight at a wall, W crawls up it.
@@ -80,8 +80,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 | --- | --- |
 | Manual / Newtonian | No automatic damping. Roll keys fire the roll jets directly, and any spin stays until you counter it with X. The brake key is disabled. |
 | Rate damp (default) | Rotation is damped when you stop steering. Linear drift remains. |
-| Attitude hold | A PD controller holds your attitude while you translate and returns you to it after you're bumped. |
-| Velocity match | Attitude hold, plus an automatic burn to match the velocity of the station, or of the target locked with L. This uses a lot of gas. |
+| Auto-stop | Rate damp, plus: whenever no movement key is held, the jets stop you relative to the map. |
 
 ## Combat
 
@@ -154,6 +153,7 @@ There are also options for infinite gas and enemy outlines.
 **Animations:** first-person and third-person animations for:
 
 * recoil;
+* the support hand moves on a damped spring toward each reload pose, so it never teleports between phases, and shell-by-shell loading keeps the gun tipped steadily from round to round;
 * rifle magazine reloads: the gun tips its mag well toward you, and the hand thumbs the release and pulls the empty mag, which floats off in zero-g. A fresh mag comes from the belt pouch, turned into line under the well, pushed up and slapped home. Empty reloads end with a charging-handle rack. Each step has its own click, clack and rack sound;
 * gyrojet reloads one rocket at a time: the hand brings a rocket cartridge (steel body, glowing tip) from the belt to the loading port, pushes it in, and the drum indexes one chamber. Firing interrupts the reload once a round is loaded;
 * shell-by-shell flechette reloads, with a visible shell in the hand;
