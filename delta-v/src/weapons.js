@@ -12,7 +12,7 @@ export const WEAPONS = {
   },
   gyrojet: {
     id: 'gyrojet', hipSpread: 0.008, adsSpread: 0.0008, name: 'GJ-3 GYROJET', short: 'GJ-3', kind: 'rocket',
-    speed: 30, accel: 280, burn: 1.3, dmg: 72, headMul: 1.3, splash: 3.2, splashDmg: 45, projRadius: 0.3, rpm: 100, mag: 5, reserve: 30, reload: 2.6,
+    speed: 30, accel: 280, burn: 1.3, dmg: 72, headMul: 1.3, splash: 3.2, splashDmg: 45, projRadius: 0.3, rpm: 100, mag: 5, reserve: 30, reload: 0.62, perShell: true,
     spread: 0.001, auto: false, mass: 5.0, kick: 0.006, ejecta: 0.6, tracer: 0xff7040, sound: 'gyro',
   },
   recoilless: {

@@ -67,7 +67,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 
 ### Mag boots, auto-stop and holding on
 
-* **Mag boots** (Settings, on by default): touch any surface feet-first, on any map, and the boots lock on. You walk it like a floor (WASD, mouse look with head pitch), with the RCS off. Walking into a wall tips you onto it, so inside corners carry you up walls and onto ceilings. Space jumps off into flight. The Spin Drum floor works the same way.
+* **Mag boots** (Settings, on by default): touch any surface feet-first, on any map, and the boots lock on. You walk it like a floor (WASD, mouse look with head pitch), with the RCS off. Walking into a wall tips you onto it, so inside corners carry you up walls and onto ceilings. Space jumps off into flight. The Spin Drum floor works the same way. When the boots lock on, or you step onto a wall, the view eases round to the new 'up' with a small knee-dip instead of snapping.
 * **RCS auto-stop** (Settings, or bind *Toggle RCS auto-stop*): whenever no movement key is held, the jets bring you to a stop relative to the map, in any assist mode. Holding the brake still matches a locked target.
 * **Holding on:**
   * Your hand visibly reaches out and grips the surface (bots' arms too), and the gun goes one-handed.
@@ -154,11 +154,11 @@ There are also options for infinite gas and enemy outlines.
 **Animations:** first-person and third-person animations for:
 
 * recoil;
-* magazine reloads: the empty mag floats away in zero-g, and the hand fetches a fresh one from the belt pouch (visible in hand), seats it and slaps it. Empty reloads end with a charging-handle rack, and each step has its own click, clack and rack sound;
-* the gyrojet's drum swap, finished with a spin;
+* rifle magazine reloads: the gun tips its mag well toward you, and the hand thumbs the release and pulls the empty mag, which floats off in zero-g. A fresh mag comes from the belt pouch, turned into line under the well, pushed up and slapped home. Empty reloads end with a charging-handle rack. Each step has its own click, clack and rack sound;
+* gyrojet reloads one rocket at a time: the hand brings a rocket cartridge (steel body, glowing tip) from the belt to the loading port, pushes it in, and the drum indexes one chamber. Firing interrupts the reload once a round is loaded;
 * shell-by-shell flechette reloads, with a visible shell in the hand;
 * the flechette pump after each shot;
-* recoilless breech loading: the spent casing drifts out the back;
+* recoilless breech loading: the spent casing drifts out the back, and the fresh round is carried up from the belt into the open breech;
 * maser venting when overheated: the cell slides out and steam escapes;
 * grenade wind-up and throw;
 * hammer strikes;
@@ -184,7 +184,7 @@ A sticky footer shows a match summary and the Deploy button (Enter also deploys)
 * Kill-feed chips and banner messages.
 * A redesigned death screen.
 
-**Sights:** the light guns (rifle, flechette, maser) use frameless projected dots: a slim emitter with the reticle floating in the air. The gyrojet has a framed holographic sight, and the recoilless a scope with a full-screen optic.
+**Sights:** the light guns (rifle, flechette, maser) use frameless reflex sights: a bare pane of faintly tinted glass with polished edges. It stands in a slotted foot with set screws, on a riser and a rail clamp (jaws over the rail, cross-bolt and thumb nut). The emitter in the foot projects the reticle onto the glass. The gyrojet has a framed holographic sight, and the recoilless a scope with a full-screen optic.
 
 **Match end:** a slow-motion outro with a VICTORY / DEFEAT banner, then a results screen whose rows animate in.
 
@@ -195,7 +195,7 @@ A sticky footer shows a match summary and the Deploy button (Enter also deploys)
 The HUD shows:
 
 * Prograde and retrograde markers with your speed.
-* Enemies outlined in red. The lead marker is a small magenta diamond with a dark edge, so it never blends into the outline; it shows even when it nearly overlaps the target.
+* Enemies have a thin, semi-transparent red outline. The lead marker is a small magenta diamond with a dark edge, so it never blends into the outline; it shows even when it nearly overlaps the target.
 * Rotation-rate arcs around the reticle for yaw, pitch and roll.
 * Range, relative velocity and closing speed to whatever is under the crosshair.
 * Hitmarkers that pop and fade: white for body hits, yellow for headshots, red with a ring for kills. Optional floating damage numbers stack rapid hits.

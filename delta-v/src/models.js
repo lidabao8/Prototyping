@@ -147,17 +147,44 @@ function holoSight(B, M, y, z, reticleMat, wide = 0.05, kind = 'ticks', edgeMat 
   return [glass, ret];
 }
 
-/** Frameless holo: a slim emitter block on the rail projects the reticle into open air (no window frame). */
-function floatingDot(B, M, y, z, reticleMat, kind, edgeMat) {
-  B.add(RB(0.03, 0.016, 0.05, 0.005), M.poly, 0, y - 0.03, z + 0.02);
-  B.add(RB(0.024, 0.01, 0.028, 0.004), M.gun, 0, y - 0.019, z + 0.03, -0.35);
-  B.add(BOX(0.016, 0.003, 0.004), edgeMat || reticleMat, 0, y - 0.014, z + 0.017);
-  // faint projected plane so the dot reads as a hologram
-  const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.026), new THREE.MeshBasicMaterial({ color: reticleMat.color, transparent: true, opacity: 0.05, depthWrite: false, blending: THREE.AdditiveBlending }));
-  glow.position.set(0, y, z - 0.01);
+/** Frameless reflex sight: a bare pane of glass standing in a slotted foot, on a riser and a rail clamp
+ *  (jaws hugging the rail, cross-bolt and thumb nut). The emitter in the foot throws the reticle onto the glass.
+ *  railY = top of the rail/receiver the clamp sits on. */
+function floatingDot(B, M, y, z, reticleMat, kind, edgeMat, railY) {
+  const W = 0.05, H = 0.038, gz = z - 0.01;
+  const base = railY, clampH = 0.011, footY = y - H / 2;
+  // rail clamp: body, two jaws that wrap down over the rail edges, cross-bolt and a thumb nut
+  B.add(RB(0.03, clampH, 0.048, 0.003), M.poly, 0, base + clampH / 2, z + 0.01);
+  for (const s of [-1, 1]) B.add(RB(0.005, 0.016, 0.036, 0.0015), M.gun, s * 0.0175, base, z + 0.01);
+  B.add(CYL(0.0028, 0.0028, 0.042, 8), M.metal, 0, base - 0.002, z + 0.018, 0, 0, Math.PI / 2);
+  B.add(CYL(0.0065, 0.0065, 0.005, 10), M.metal, 0.023, base - 0.002, z + 0.018, 0, 0, Math.PI / 2);
+  B.add(CYL(0.0035, 0.0035, 0.003, 6), M.gun, -0.0215, base - 0.002, z + 0.018, 0, 0, Math.PI / 2);
+  // riser: a short tapered post from the clamp up to the glass foot, braced at the back
+  const rise = footY - 0.004 - (base + clampH);
+  if (rise > 0.001) {
+    B.add(RB(0.016, rise + 0.002, 0.012, 0.002), M.gun, 0, base + clampH + rise / 2, gz + 0.002);
+    B.add(RB(0.01, rise + 0.002, 0.02, 0.002), M.poly, 0, base + clampH + rise / 2, gz + 0.014, -0.25);
+  }
+  // slotted foot the pane is seated in (holds only the bottom edge), set screws at each end
+  B.add(RB(W + 0.006, 0.006, 0.009, 0.002), M.poly, 0, footY - 0.001, gz);
+  for (const s of [-1, 1]) B.add(CYL(0.0016, 0.0016, 0.002, 6), M.metal, s * (W / 2 - 0.001), footY - 0.001, gz - 0.0045, Math.PI / 2);
+  // emitter window in the foot, behind the glass, facing it
+  B.add(BOX(0.008, 0.003, 0.003), edgeMat || reticleMat, 0, footY + 0.0005, gz + 0.006);
+  // the pane: faintly tinted glass with brighter polished edges so you can see where it is
+  const pane = new THREE.Group();
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.0016), new THREE.MeshPhysicalMaterial({ color: 0xbfeaff, roughness: 0.04, metalness: 0, envMapIntensity: 0.25, specularIntensity: 0.4, transparent: true, opacity: 0.06, depthWrite: false, side: THREE.DoubleSide }));
+  glass.position.set(0, y, gz);
+  const edgeM = new THREE.MeshBasicMaterial({ color: 0xcff2ff, transparent: true, opacity: 0.3, depthWrite: false });
+  const e = 0.0011;
+  for (const [ex, ey, ew, eh] of [[0, H / 2 - e / 2, W, e], [-W / 2 + e / 2, 0, e, H], [W / 2 - e / 2, 0, e, H]]) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(ew, eh, 0.0019), edgeM);
+    m.position.set(ex, y + ey, gz);
+    pane.add(m);
+  }
+  pane.add(glass);
   const ret = reticle(kind, reticleMat);
-  ret.position.set(0, y, z - 0.011);
-  return [glow, ret];
+  ret.position.set(0, y, gz + 0.0012); ret.renderOrder = 2;
+  return [pane, ret];
 }
 
 /** Sci-fi scope: a hollow squared tube you can actually look through, glowing objective ring, side rangefinder. */
@@ -213,7 +240,7 @@ export function buildGun(id, teamColor, opts = {}) {
     B.add(BOX(0.03, 0.025, 0.05), M.gun, 0.04, 0.02, -0.02);
     MB.add(RB(0.038, 0.17, 0.07, 0.01), M.poly, 0, -0.08, 0, 0.18);
     MB.add(BOX(0.04, 0.02, 0.072), M.metal, 0, -0.165, -0.015, 0.18);
-    extra = floatingDot(B, M, 0.1, -0.08, M.red, 'ticks');
+    extra = floatingDot(B, M, 0.1, -0.08, M.red, 'ticks', null, 0.064);
     ud.sight.set(0, 0.1, -0.1); ud.zoom = 1.6; ud.magRest = new THREE.Vector3(0, -0.05, -0.15); ud.muzzle.set(0, 0.012, -0.78);
   } else if (id === 'shotgun') {
     B.add(RB(0.085, 0.11, 0.32, 0.015), M.gun, 0, 0, -0.04);
@@ -228,8 +255,8 @@ export function buildGun(id, teamColor, opts = {}) {
     for (let i = 0; i < 4; i++) B.add(CYL(0.008, 0.008, 0.03, 8), M.red, 0.045, 0.0, -0.1 - i * 0.04, 0, 0, Math.PI / 2);
     MB.add(RB(0.06, 0.06, 0.15, 0.02), M.tan, 0, 0, 0);
     for (let i = 0; i < 5; i++) MB.add(BOX(0.062, 0.006, 0.01), M.poly, 0, 0.0, -0.06 + i * 0.03);
-    extra = floatingDot(B, M, 0.092, -0.05, M.green, 'ring', M.green);
-    ud.sight.set(0, 0.092, -0.07); ud.zoom = 1.25; ud.muzzle.set(0, 0.025, -0.64); ud.magRest = new THREE.Vector3(0, -0.022, -0.4); ud.hand.set(0, -0.04, -0.4); ud.pump = true;
+    extra = floatingDot(B, M, 0.092, -0.05, M.green, 'ring', M.green, 0.055);
+    ud.sight.set(0, 0.092, -0.07); ud.zoom = 1.25; ud.port = new THREE.Vector3(0, -0.06, -0.05); ud.cartridge = 'shell'; ud.muzzle.set(0, 0.025, -0.64); ud.magRest = new THREE.Vector3(0, -0.022, -0.4); ud.hand.set(0, -0.04, -0.4); ud.pump = true;
   } else if (id === 'gyrojet') {
     // tri-barrel rocket carbine with a drum magazine
     B.add(RB(0.085, 0.11, 0.3, 0.018), M.gun, 0, 0, -0.06);
@@ -255,8 +282,9 @@ export function buildGun(id, teamColor, opts = {}) {
     MB.add(CYL(0.062, 0.062, 0.07, 18), M.gun, 0, 0, 0, 0, 0, Math.PI / 2);
     MB.add(CYL(0.064, 0.064, 0.012, 18), M.orange, 0, 0, 0, 0, 0, Math.PI / 2);
     MB.add(CYL(0.02, 0.02, 0.075, 10), M.poly, 0, 0, 0, 0, 0, Math.PI / 2);
+    for (let k = 0; k < 5; k++) { const an = k / 5 * Math.PI * 2; MB.add(CYL(0.011, 0.011, 0.074, 8), M.metal, 0, Math.cos(an) * 0.04, Math.sin(an) * 0.04, 0, 0, Math.PI / 2); }
     extra = holoSight(B, M, 0.115, -0.07, M.orange, 0.046, 'chevron', M.orange);
-    ud.sight.set(0, 0.115, -0.08); ud.zoom = 1.7; ud.magRest = new THREE.Vector3(0, -0.085, -0.13); ud.hand.set(0, -0.03, -0.36); ud.drum = true;
+    ud.sight.set(0, 0.115, -0.08); ud.zoom = 1.7; ud.magRest = new THREE.Vector3(0, -0.085, -0.13); ud.hand.set(0, -0.03, -0.36); ud.drum = true; ud.port = new THREE.Vector3(0.045, -0.06, -0.13); ud.cartridge = 'rocket';
     ud.muzzle.set(0, 0.012, -0.54);
   } else if (id === 'recoilless') {
     B.add(CYL(0.068, 0.068, 0.9, 18), M.tan, 0, 0.02, -0.2, Math.PI / 2);
@@ -289,13 +317,13 @@ export function buildGun(id, teamColor, opts = {}) {
     B.add(BOX(0.063, 0.004, 0.012), M.yellowDim, 0, 0.0, 0.25);
     MB.add(RB(0.03, 0.06, 0.12, 0.008), M.gun, 0, 0, 0);
     MB.add(BOX(0.032, 0.03, 0.08), M.yellow, 0, 0.0, 0);
-    extra = floatingDot(B, M, 0.135, -0.05, M.yellow, 'bars', M.yellow);
+    extra = floatingDot(B, M, 0.135, -0.05, M.yellow, 'bars', M.yellow, 0.0775);
     ud.sight.set(0, 0.135, -0.06); ud.zoom = 1.6; ud.magRest = new THREE.Vector3(-0.06, -0.005, -0.07); ud.cell = true;
     ud.muzzle.set(0, 0.006, -0.56);
   }
   const body = B.build(!opts.noShadow);
   g.add(body);
-  for (const e of extra) { e.userData.noOutline = true; g.add(e); }
+  for (const e of extra) { e.traverse((o) => { o.userData.noOutline = true; }); g.add(e); }
   mag = MB.build(!opts.noShadow);
   mag.position.copy(ud.magRest);
   g.add(mag);

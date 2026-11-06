@@ -71,8 +71,8 @@ export function makeGunMesh(id, teamColor, opts = {}) {
 
 // Inverted-hull outline: back faces pushed out along the vertex direction by a roughly constant pixel width.
 export const OUTLINE_MAT = new THREE.ShaderMaterial({
-  side: THREE.BackSide,
-  uniforms: { color: { value: new THREE.Color(0xff3b2f) }, thick: { value: 0.0032 } },
+  side: THREE.BackSide, transparent: true, depthWrite: false,
+  uniforms: { color: { value: new THREE.Color(0xd8402f) }, thick: { value: 0.0017 }, alpha: { value: 0.55 } },
   vertexShader: `uniform float thick;
     void main(){
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -80,7 +80,7 @@ export const OUTLINE_MAT = new THREE.ShaderMaterial({
       mv.xyz += dir * thick * max(1.5, -mv.z);
       gl_Position = projectionMatrix * mv;
     }`,
-  fragmentShader: 'uniform vec3 color; void main(){ gl_FragColor = vec4(color, 1.0); }',
+  fragmentShader: 'uniform vec3 color; uniform float alpha; void main(){ gl_FragColor = vec4(color, alpha); }',
 });
 
 function addOutlines(root) {
@@ -499,6 +499,7 @@ export class Soldier {
     if (vn > 11) this.game.damage(this, (vn - 11) * 16, null, 'landing', this.pos.clone().addScaledVector(up, -1));
     if (vn > 2) this.game.onImpact(this, vn, this.pos.clone().addScaledVector(up, -1.05), up.clone());
     const view = this.aimDir(_w3).clone();
+    this.beginViewBlend(0.4, 1);
     this.quat.premultiply(_q.setFromUnitVectors(bodyUp, up)).normalize();
     this.aimPitch = 0; this.aimYaw = 0;
     this.walking = true; this.holdQ = null;
@@ -507,6 +508,12 @@ export class Soldier {
     this.vel.addScaledVector(up, -this.vel.dot(up));
     this.setAimDir(view);
     if (this.isPlayer && !world.omega) this.game.audio.play('grab');
+  }
+
+  /** Camera eases from the current view to the new one instead of snapping (mag boots lock / wall step). */
+  beginViewBlend(dur, dip) {
+    if (!this.isPlayer) return;
+    this.viewBlend = { from: this.aimQuat(new THREE.Quaternion()), t0: this.game.time, dur, dip };
   }
 
   leaveWalk() {
@@ -581,6 +588,7 @@ export class Soldier {
     if (stepTo) {
       // tip forward onto the new surface; the old floor becomes the wall behind you
       const view = this.aimDir(_w3).clone();
+      this.beginViewBlend(0.45, 0.6);
       this.walkUp.copy(stepTo);
       this.quat.premultiply(_q.setFromUnitVectors(_v4.set(0, 1, 0).applyQuaternion(this.quat), stepTo)).normalize();
       this.aimPitch = 0;

@@ -14,6 +14,7 @@ import { THROW_TIME } from './soldier.js';
 import { clamp, rand, raySphere } from './math.js';
 
 const STEP = 1 / 120;
+const sm01 = (u) => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
 const CALLSIGNS = ['VEGA', 'KESTREL', 'NOMAD', 'APEX', 'ORBIT', 'HALO', 'RAZOR', 'TALON', 'DRIFT', 'NOVA', 'SPECTER', 'CINDER', 'ECHO', 'PULSAR', 'QUASAR', 'ZENITH'];
 export const ACTIONS = [
   ['forward', 'Move forward', 'KeyW'], ['back', 'Move back', 'KeyS'], ['left', 'Move left', 'KeyA'], ['right', 'Move right', 'KeyD'],
@@ -205,6 +206,13 @@ class Game {
     this.vmSway = new THREE.Vector2(); this.vmMove = new THREE.Vector3();
     this.vmShell = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.045, 10).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xb8322a, roughness: 0.5, metalness: 0.3 }));
     this.vmShell.visible = false; this.vm.add(this.vmShell);
+    // gyrojet rocket cartridge: steel body with a glowing tip (axis along local z, tip forward)
+    this.vmRocket = new THREE.Group();
+    const rb = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.07, 12).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x9aa2aa, roughness: 0.35, metalness: 0.8 }));
+    const rt = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.026, 12).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff8a2a).multiplyScalar(1.8) }));
+    rt.position.z = -0.048;
+    this.vmRocket.add(rb, rt);
+    this.vmRocket.visible = false; this.vm.add(this.vmRocket);
   }
 
   buildGrid() {
@@ -1197,12 +1205,21 @@ class Game {
     if (w.reloadT > 0 && def.reload > 0) {
       const r = 1 - w.reloadT / def.reload;
       if (def.perShell) {
-        // flechette: fetch a shell from the belt and thumb it into the loading port, one per cycle
-        rot.z += 0.38; rot.x += 0.14; pos.y -= 0.02;
-        const port = this.gunPoint(gun, new THREE.Vector3(0, -0.06, -0.05), pos, rot);
-        handOverride = r < 0.45 ? belt.clone().lerp(port, sm(0.12, 0.45, r)) : r < 0.7 ? port.clone().add(new THREE.Vector3(0, 0.012 * bell((r - 0.45) / 0.25), -0.02 * sm(0.45, 0.6, r))) : port.clone().lerp(belt, sm(0.72, 1, r) * 0.7);
-        shellVis = r > 0.12 && r < 0.55;
-        pos.y -= 0.006 * bell((r - 0.5) / 0.15);
+        // round-by-round: fetch a cartridge from the belt, line it up with the port, push it in
+        const gyro = ud.cartridge === 'rocket';
+        const tilt = sm(0, 0.15, r);
+        rot.z += (gyro ? -0.5 : 0.38) * tilt; rot.x += (gyro ? 0.2 : 0.14) * tilt; pos.y -= 0.02 * tilt;
+        const portL = ud.port || new THREE.Vector3(0, -0.06, -0.05);
+        const port = this.gunPoint(gun, portL, pos, rot);
+        const approach = this.gunPoint(gun, portL.clone().add(gyro ? new THREE.Vector3(0.09, -0.02, 0.02) : new THREE.Vector3(0, -0.07, 0.05)), pos, rot);
+        const pouch = belt.clone().add(new THREE.Vector3(0.05, 0.06, -0.04));
+        handOverride = r < 0.38 ? pouch.clone().lerp(approach, sm(0.12, 0.38, r))
+          : r < 0.6 ? approach.clone().lerp(port, sm(0.4, 0.58, r))
+          : port.clone().lerp(pouch, sm(0.68, 1, r) * 0.8);
+        shellVis = r > 0.1 && r < 0.6;
+        // drum indexes one chamber per rocket loaded
+        if (gyro) magSpin = -(w.mag + sm(0.6, 0.8, r)) * Math.PI * 2 / 5;
+        if (r > 0.56 && r < 0.66) pos.y -= 0.006 * bell((r - 0.56) / 0.1); // push
       } else if (ud.breech) {
         // recoilless: breech swings open, spent casing drifts out the back, fresh round carried in
         rot.x += 0.5 * bell(r); pos.y -= 0.05 * bell(r); rot.z += 0.15 * bell(r);
@@ -1212,22 +1229,25 @@ class Game {
         if (this.prevReloadR != null && this.prevReloadR < 0.3 && r >= 0.3) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, 0.3, 1.4));
         const breech = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
         handOverride = r < 0.3 ? null : r < 0.55 ? belt.clone().lerp(breech, sm(0.42, 0.55, r)) : r < 0.88 ? breech : null;
+        carry = r > 0.36 && r < 0.55;
       } else {
-        // box / drum magazines: tilt, release, the old one floats away, new one seated with a slap
-        const drum = !!ud.drum;
-        rot.z += (drum ? 0.75 : 0.5) * bell(r); rot.x += 0.22 * bell(r); pos.y -= 0.035 * bell(r);
-        if (r > 0.08 && r < 0.26) magOff.y = -0.12 * sm(0.08, 0.26, r);
-        else if (r >= 0.26 && r < 0.55) magVis = false;
-        else if (r >= 0.55 && r < 0.8) magOff.y = -0.3 * (1 - sm(0.55, 0.8, r));
-        if (this.prevReloadR != null && this.prevReloadR < 0.26 && r >= 0.26) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, -1.2, 0.2));
-        if (drum && r > 0.8 && r < 0.95) magSpin = sm(0.8, 0.95, r) * Math.PI * 2;
+        // box magazines: tilt to show the well, thumb the release, the old mag drops and floats off,
+        // fresh mag from the pouch lined up under the well, pushed up and slapped home
+        const tilt = sm(0, 0.12, r) * (1 - sm(0.88, 1, r));
+        rot.z -= 0.6 * tilt; rot.x += 0.1 * tilt; rot.y += 0.15 * tilt; pos.y += 0.035 * tilt; pos.x -= 0.07 * tilt; pos.z += 0.03 * tilt;
+        if (r > 0.1 && r < 0.24) magOff.y = -0.14 * sm(0.1, 0.24, r);
+        else if (r >= 0.24 && r < 0.56) magVis = false;
+        else if (r >= 0.56 && r < 0.64) magOff.y = -0.14;
+        else if (r >= 0.64 && r < 0.78) magOff.y = -0.14 * (1 - sm(0.64, 0.78, r));
+        if (this.prevReloadR != null && this.prevReloadR < 0.24 && r >= 0.24) this.ejectDebris(gun, ud, pos, rot, magOff, p, new THREE.Vector3(0, -1.2, 0.2));
         const magW = this.gunPoint(gun, ud.magRest.clone().add(magOff), pos, rot);
-        // hand: thumb the release, down to the belt pouch, back up carrying the fresh mag, seat it
         const pouch = belt.clone().add(new THREE.Vector3(0.04, 0.06, -0.04));
-        const below = this.gunPoint(gun, ud.magRest.clone().add(new THREE.Vector3(0, -0.3, 0)), pos, rot);
-        handOverride = r < 0.08 ? null : r < 0.26 ? magW : r < 0.4 ? magW.clone().lerp(pouch, sm(0.26, 0.4, r)) : r < 0.55 ? pouch.clone().lerp(below, sm(0.42, 0.55, r)) : r < 0.82 ? magW.clone().add(new THREE.Vector3(0, -0.03, 0)) : null;
-        carry = r > 0.4 && r < 0.55;
-        if (r > 0.8 && r < 0.88) pos.y += 0.014 * bell((r - 0.8) / 0.08); // slap
+        const below = this.gunPoint(gun, ud.magRest.clone().add(new THREE.Vector3(0, -0.14, 0)), pos, rot);
+        const cup = new THREE.Vector3(0, -0.035, 0.01); // hand cups the base of the mag
+        handOverride = r < 0.1 ? null : r < 0.24 ? magW.clone().add(cup) : r < 0.4 ? magW.clone().lerp(pouch, sm(0.24, 0.4, r))
+          : r < 0.56 ? pouch.clone().lerp(below.clone().add(cup), sm(0.42, 0.56, r)) : r < 0.8 ? magW.clone().add(cup) : null;
+        carry = r > 0.42 && r < 0.56;
+        if (r > 0.78 && r < 0.86) pos.y += 0.016 * bell((r - 0.78) / 0.08); // slap home
         // racking the charging handle after an empty reload
         if (w.emptyReload && r > 0.86) {
           const q = sm(0.86, 0.93, r) - sm(0.95, 1, r);
@@ -1237,7 +1257,7 @@ class Game {
       }
       // reload foley at fixed points of the animation
       const cross = (x) => this.prevReloadR != null && this.prevReloadR < x && r >= x;
-      if (!def.perShell && !ud.breech) { if (cross(0.22)) this.audio.play('magout'); if (cross(0.76)) this.audio.play('magin'); if (w.emptyReload && cross(0.9)) this.audio.play('rack'); }
+      if (!def.perShell && !ud.breech) { if (cross(0.22)) this.audio.play('magout'); if (cross(0.78)) this.audio.play('magin'); if (w.emptyReload && cross(0.9)) this.audio.play('rack'); }
       if (ud.breech) { if (cross(0.3)) this.audio.play('magout'); if (cross(0.82)) this.audio.play('magin'); }
       if (def.perShell && cross(0.5)) this.audio.play('shell');
       this.prevReloadR = r;
@@ -1302,15 +1322,26 @@ class Game {
     this.placeArm(this.vmArmR, gripW, new THREE.Vector3(0.36, -0.62, 0.18));
     this.placeArm(this.vmArmL, handW, new THREE.Vector3(-0.4, -0.58, 0.05));
     this.vmNade.visible = nadeVis;
-    this.vmShell.visible = shellVis;
+    const rocketCart = ud.cartridge === 'rocket';
+    this.vmShell.visible = shellVis && !rocketCart;
+    this.vmRocket.visible = shellVis && rocketCart;
     // the fresh magazine travels up from the pouch in the hand
     if (!this.vmCarry || this.vmCarry.userData.id !== def.id) {
       if (this.vmCarry) this.vm.remove(this.vmCarry);
       this.vmCarry = ud.mag.clone(true); this.vmCarry.userData.id = def.id; this.vmCarry.scale.setScalar(this.vmS); this.vm.add(this.vmCarry);
     }
     this.vmCarry.visible = carry;
-    if (carry) { this.vmCarry.position.copy(handW).add(new THREE.Vector3(0.0, 0.04, -0.02)); this.vmCarry.quaternion.setFromEuler(rot).multiply(_q.setFromEuler(new THREE.Euler(0.4, 0, 0.3))); }
-    if (shellVis) this.vmShell.position.copy(handW).add(new THREE.Vector3(0.01, 0.03, -0.03));
+    if (carry) {
+      // held by its base, turning to match the well/breech as it comes up
+      const r = this.prevReloadR == null ? 0 : this.prevReloadR, k = ud.breech ? sm01((r - 0.36) / 0.19) : sm01((r - 0.42) / 0.14);
+      this.vmCarry.position.copy(handW).add(new THREE.Vector3(0.0, 0.035 + 0.01 * k, -0.01));
+      this.vmCarry.quaternion.setFromEuler(rot).multiply(_q.setFromEuler(new THREE.Euler(0.6 * (1 - k), 0, 0.45 * (1 - k))));
+    }
+    if (shellVis) {
+      const cart = rocketCart ? this.vmRocket : this.vmShell;
+      cart.position.copy(handW).add(new THREE.Vector3(0.0, 0.03, -0.03));
+      cart.quaternion.setFromEuler(rot);
+    }
     if (nadeVis) this.vmNade.position.copy(handW).add(new THREE.Vector3(0.0, 0.035, -0.04));
     this.vmFlash.intensity *= Math.exp(-dt * 30);
   }
@@ -1338,6 +1369,17 @@ class Game {
     mesh.quaternion.copy(this.camera.quaternion).multiply(_q.setFromEuler(rot));
     const vel = kickCam.clone().applyQuaternion(this.camera.quaternion).add(p.vel);
     this.fx.debris(mesh, vel, new THREE.Vector3(rand(-4, 4), rand(-4, 4), rand(-4, 4)), 6);
+  }
+
+  /** Camera eases from the old view to the new one after mag boots lock / step onto a wall, with a small knee-dip. */
+  applyViewBlend(cam, p) {
+    const vb = p.viewBlend;
+    if (!vb) return;
+    const u = (this.time - vb.t0) / vb.dur;
+    if (u >= 1 || u < 0) { p.viewBlend = null; return; }
+    const k = u * u * (3 - 2 * u);
+    cam.quaternion.copy(vb.from.clone().slerp(cam.quaternion.clone(), k));
+    if (p.walkUp) cam.position.addScaledVector(p.walkUp, -0.14 * vb.dip * Math.sin(Math.min(1, u * 1.4) * Math.PI));
   }
 
   /** Gun-local point -> camera space for a given holder pose. */
@@ -1396,6 +1438,7 @@ class Game {
     const ud = gun.userData;
     if (p.alive) {
       p.aimQuat(cam.quaternion);
+      this.applyViewBlend(cam, p);
       if (this.shake > 0.01) {
         const a = this.shake * 0.06;
         cam.position.add(_v.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(this.shake * 0.08));
