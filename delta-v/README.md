@@ -186,7 +186,7 @@ A sticky footer shows a match summary and the Deploy button (Enter also deploys)
 The HUD shows:
 
 * Prograde and retrograde markers with your speed.
-* Enemies outlined in red. The lead marker is a small diamond that fades out when it nearly overlaps the target.
+* Enemies outlined in red. The lead marker is a small magenta diamond with a dark edge, so it never blends into the outline; it shows even when it nearly overlaps the target.
 * Rotation-rate arcs around the reticle for yaw, pitch and roll.
 * Range, relative velocity and closing speed to whatever is under the crosshair.
 * Hitmarkers that pop and fade: white for body hits, yellow for headshots, red with a ring for kills. Optional floating damage numbers stack rapid hits.

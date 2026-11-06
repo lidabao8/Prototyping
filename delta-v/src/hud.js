@@ -6,6 +6,7 @@ const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vecto
 const css = (hex) => '#' + hex.toString(16).padStart(6, '0');
 const BLUE = css(TEAM_COLORS[0]), ORANGE = css(TEAM_COLORS[1]);
 const HUD_C = '#9fe8ff', WARN = '#ffcc4d', DANGER = '#ff4b3a', OK = '#7dff9a';
+const LEAD = 'rgba(255,92,240,0.9)'; // lead marker: magenta, distinct from red outlines and the cyan/green/yellow HUD
 
 export class HUD {
   constructor(game, canvas) {
@@ -289,11 +290,13 @@ export class HUD {
       const t = def.kind === 'rocket' ? interceptTimeRocket(rel, vRel, def.speed, def.accel, def.burn) : interceptTime(rel, vRel, def.speed);
       if (t > 0 && vRel.length() > 0.15) {
         const lp = this.project(_v3.copy(s.pos).addScaledVector(vRel, t), {});
-        const a = 0.75;
         if (lp.on) {
-          g.strokeStyle = `rgba(255,110,90,${a})`; g.lineWidth = 1.2;
-          const r = 4;
-          g.beginPath(); g.moveTo(lp.x, lp.y - r); g.lineTo(lp.x + r, lp.y); g.lineTo(lp.x, lp.y + r); g.lineTo(lp.x - r, lp.y); g.closePath(); g.stroke();
+          // magenta so it never blends with the red enemy outline; dark edge keeps it readable anywhere
+          const r = 4.5;
+          const dia = () => { g.beginPath(); g.moveTo(lp.x, lp.y - r); g.lineTo(lp.x + r, lp.y); g.lineTo(lp.x, lp.y + r); g.lineTo(lp.x - r, lp.y); g.closePath(); };
+          g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 3; dia(); g.stroke();
+          g.strokeStyle = LEAD; g.lineWidth = 1.4; dia(); g.stroke();
+          g.fillStyle = LEAD; g.fillRect(lp.x - 0.75, lp.y - 0.75, 1.5, 1.5);
           g.lineWidth = 1.5;
         }
       }
