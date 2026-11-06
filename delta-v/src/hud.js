@@ -532,7 +532,7 @@ export class HUD {
     this.spaced(`${Math.ceil(p.o2)}%`, hx + 150, y + 72, 11, p.o2 < 30 ? DANGER : '#c9d3dc', 'right', 700, 1);
     if (p.leaks.length) this.spaced(`BREACH ×${p.leaks.length}`, hx, y + 90, 10, (game.time * 3) % 1 < 0.6 ? DANGER : WARN, 'left', 700, 2);
     else {
-      const st = p.walking ? 'WALKING · RCS OFF' : p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
+      const st = p.walking ? (game.world.omega ? 'WALKING · RCS OFF' : 'MAG BOOTS · RCS OFF') : p.grab ? (p.grab.kind === 'pod' ? 'HOLDING POD' : 'ANCHORED') : p.ctrl.brake ? 'MATCHING VEL' : p.ctrl.killRot ? 'KILL ROTATION' : 'FREE FLIGHT';
       this.spaced(st, hx, y + 90, 10, p.grab || p.walking ? OK : 'rgba(159,232,255,0.75)', 'left', 700, 2);
       if (game.world.omega) {
         const gl = game.world.gravityAt(p.pos, _v).length() / 9.81;
@@ -540,7 +540,7 @@ export class HUD {
       }
     }
     // RCS mode chip above the cluster
-    const mode = `RCS · ${MODES[p.mode]}`;
+    const mode = `RCS · ${MODES[p.mode]}${this.game.settings.autoStop ? ' · AUTO-STOP' : ''}`;
     g.font = `700 11px ${this.font}`;
     const mw = g.measureText(mode).width + 40;
     this.plate(x, y - 28, mw, 22, 6, 'rgba(255,204,77,0.12)', 'rgba(255,204,77,0.4)');
@@ -723,7 +723,7 @@ export class HUD {
   drawHints(cx, cy) {
     const game = this.game, p = game.player;
     if (p.walking) {
-      this.text(`${game.keyLabel('up')}: JUMP INTO FLIGHT`, cx, cy + 120, 12, OK, 'center', 700);
+      this.text(`${game.world.omega ? 'WALKING' : 'MAG BOOTS LOCKED'} · ${game.keyLabel('up')}: JUMP INTO FLIGHT`, cx, cy + 120, 12, OK, 'center', 700);
       return;
     }
     if (p.grab) {
@@ -731,7 +731,7 @@ export class HUD {
       const pk = game.settings.binds.pushOff;
       void 0;
       this.text(c > 0 ? `PUSH ${(2 + 5 * c).toFixed(1)} m/s` : pk ? `HOLD ${game.keyLabel('pushOff')}: PUSH OFF TOWARDS AIM   ${game.keyLabel('grab')}: RELEASE` : `PUSH OFF IS UNBOUND: SET IT IN CONTROLS   ${game.keyLabel('grab')}: RELEASE`, cx, cy + 120, 13, pk || c > 0 ? OK : WARN, 'center', 700);
-      if (p.grab.kind !== 'pod' && !c) this.text('MOVE KEYS: CRAWL ALONG THE SURFACE (NO GAS)', cx, cy + 138, 11, OK, 'center');
+      if (p.grab.kind !== 'pod' && !c) this.text('MOVE KEYS: CRAWL WHERE YOU LOOK (NO GAS) · AIM WORKS WHILE HOLDING ON', cx, cy + 138, 11, OK, 'center');
       if (p.grab.kind === 'pod' && !c) this.text(`MOVE KEYS: HAUL POD (${(p.mass + p.grab.obj.mass).toFixed(0)} kg combined)`, cx, cy + 138, 11, OK, 'center');
       if (c > 0) this.bar(cx - 80, cy + 132, 160, 4, c, OK);
     } else {

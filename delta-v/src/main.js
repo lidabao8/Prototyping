@@ -26,11 +26,11 @@ export const ACTIONS = [
   ['mode', 'Cycle RCS mode', 'KeyT'], ['lockRef', 'Lock velocity reference', 'KeyL'], ['grid', 'Reference grid', 'KeyH'], ['board', 'Scoreboard', 'Tab'],
   // newer actions start unbound: assign them under Controls & keybinds
   ['pushOff', 'Push off (hold while holding on)', ''], ['adsToggle', 'Aim down sights (toggle)', ''],
-  ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''],
+  ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''], ['autoStop', 'Toggle RCS auto-stop', ''],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false, thrust: 1 };
-const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
+const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, autoStop: false, magBoots: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
 const MAP_WEIGHTS = {
@@ -247,6 +247,8 @@ class Game {
       th.addEventListener('change', () => { st.rules.thrust = Number(th.value) || 1; this.saveSettings(); if (this.refreshSummary) this.refreshSummary(); });
     }
     chk('optOutline', () => st.outlines, (v) => { st.outlines = v; });
+    chk('optAutoStop', () => st.autoStop, (v) => { st.autoStop = v; });
+    chk('optMagBoots', () => st.magBoots !== false, (v) => { st.magBoots = v; });
     this.buildBindUI();
     this.setupLoadoutUI();
     this.setupMenuChrome();
@@ -952,6 +954,7 @@ class Game {
     }
     s.angVel.multiplyScalar(0.2);
     s.holdQ = null;
+    s.grabT0 = this.time;
     if (s.isPlayer || this.distToListener(s.pos) < 15) this.audio.play('grab', s.isPlayer ? 0 : this.distToListener(s.pos));
     return true;
   }
@@ -994,6 +997,12 @@ class Game {
       p.mode = (p.mode + 1) % MODES.length; this.settings.mode = p.mode; this.saveSettings();
       this.hud.message(`RCS MODE: ${MODES[p.mode]}`, '#ffcc4d', 2.5);
       this.hud.message(MODE_DESC[p.mode], '#9fe8ff', 3);
+      this.audio.play('mode');
+    }
+    if (this.pressedAct('autoStop')) {
+      this.settings.autoStop = !this.settings.autoStop; this.saveSettings();
+      const el = document.getElementById('optAutoStop'); if (el) el.checked = this.settings.autoStop;
+      this.hud.message(this.settings.autoStop ? 'RCS AUTO-STOP ON – HOLDS STILL RELATIVE TO THE MAP' : 'RCS AUTO-STOP OFF', '#ffcc4d', 2);
       this.audio.play('mode');
     }
     if (this.pressedAct('grid')) { this.showGrid = !this.showGrid; this.hud.message(this.showGrid ? 'REFERENCE GRID ON' : 'REFERENCE GRID AUTO', '#9fe8ff', 1.5); }
@@ -1260,6 +1269,23 @@ class Game {
       else handOverride = out.clone().lerp(down, sm(0.55, 0.85, q));
       nadeVis = q > 0.12 && q < 0.4;
     }
+    // holding on: the left hand reaches out and grips the surface; the gun goes one-handed
+    let gripHand = null;
+    if (p.grab && p.throwT <= 0) {
+      const gp = p.grabPoint(new THREE.Vector3());
+      if (gp) {
+        const local = this.camera.worldToLocal(gp.clone());
+        if (local.z > -0.12 || local.length() > 0.75) local.set(-0.3, -0.34, -0.38); // out of reach or behind: hand low-left
+        else local.multiplyScalar(0.92);
+        const k = sm(0, 0.22, t - (p.grabT0 || 0));
+        // hand-over-hand shuffle while crawling
+        if (p.vel.lengthSq() > 0.1 && p.grab.kind !== 'pod') local.y += Math.sin(t * 9) * 0.03;
+        gripHand = local;
+        const hand0 = this.gunPoint(gun, ud.hand, pos, rot);
+        gripHand = hand0.lerp(local, k);
+        if (ads < 0.5) { rot.z += 0.18 * k; pos.y -= 0.03 * k; pos.x += 0.02 * k; }
+      }
+    }
     // hammer strike
     if (p.meleeT > 0) { const q = 1 - p.meleeT / 0.35; pos.z -= 0.22 * bell(q); rot.y += 0.45 * bell(q); rot.z -= 0.35 * bell(q); }
     if (p.switchT > 0) { const q = p.switchT / 0.45; pos.y -= 0.28 * q; rot.x -= 0.9 * q; }
@@ -1272,7 +1298,7 @@ class Game {
     this.vmMuzzleCam = this.gunPoint(gun, ud.muzzle, pos, rot);
     // arms
     const gripW = this.gunPoint(gun, ud.grip, pos, rot);
-    const handW = handOverride || this.gunPoint(gun, ud.pump ? ud.hand.clone().add(new THREE.Vector3(0, 0, magOff.z)) : ud.hand, pos, rot);
+    const handW = handOverride || gripHand || this.gunPoint(gun, ud.pump ? ud.hand.clone().add(new THREE.Vector3(0, 0, magOff.z)) : ud.hand, pos, rot);
     this.placeArm(this.vmArmR, gripW, new THREE.Vector3(0.36, -0.62, 0.18));
     this.placeArm(this.vmArmL, handW, new THREE.Vector3(-0.4, -0.58, 0.05));
     this.vmNade.visible = nadeVis;

@@ -512,7 +512,7 @@ export class Bot {
     // on a gravity floor: legs, not thrusters
     if (s.walking) {
       s.walkTarget = (s.walkTarget || new THREE.Vector3()).copy(vDes);
-      s.walkJump = vDes.dot(w.upAt(s.pos, _v3)) > 2.2;
+      s.walkJump = vDes.dot(s.walkUp || w.upAt(s.pos, _v3)) > 2.2;
       return;
     }
     s.walkTarget = null;

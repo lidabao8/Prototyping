@@ -335,9 +335,11 @@ export class Soldier {
     }
     // translation
     const cmdT = _cmdT.copy(c.move);
-    const autoMatch = !manual && (c.brake || (mode === 3 && !this.isBot));
+    const autoStop = this.isPlayer && this.game.settings.autoStop;
+    const autoMatch = autoStop || (!manual && (c.brake || (mode === 3 && !this.isBot)));
     if (autoMatch) {
-      const ref = this.refTarget && this.refTarget.alive !== false ? this.refTarget.vel : _zero;
+      // auto-stop always holds still relative to the map; brake / velocity match use the locked target if any
+      const ref = !autoStop || c.brake ? (this.refTarget && this.refTarget.alive !== false ? this.refTarget.vel : _zero) : _zero;
       const vr = _v.subVectors(this.vel, ref).applyQuaternion(_q.copy(this.quat).invert());
       for (const k of ['x', 'y', 'z']) {
         if (c.brake || cmdT[k] === 0) {
@@ -451,7 +453,7 @@ export class Soldier {
     q.normalize();
     // collisions
     this.collide(dt, world);
-    if (this.alive && world.omega) this.tryLand(world);
+    if (this.alive) this.tryLand(world);
   }
 
   stepGrabbed(dt) {
@@ -483,16 +485,15 @@ export class Soldier {
   }
 
   /** On a spinning map: touching the floor feet-down switches to walking. */
+  /** Mag boots: touching any surface feet-first locks you onto it (walk it like a floor). */
   tryLand(world) {
     if (this.jumpGrace > 0) return;
-    const up = world.upAt(this.pos, _w1);
-    if (this.vel.dot(up) > 0.8) return; // still rising off the floor: stay in flight
-    const gmag = world.gravityAt(this.pos, _g1).length();
-    if (gmag < 0.8) return;
-    const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.3, true);
-    if (!h || h.n.dot(up) < 0.5) return;
+    if (this.isPlayer && this.game.settings.magBoots === false) return;
     const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
-    if (bodyUp.dot(up) < 0.35) return; // landed on your back or head: tumble instead
+    const h = world.raycast(this.pos, _w2.copy(bodyUp).negate(), 1.3, true);
+    if (!h || h.n.dot(bodyUp) < 0.6) return; // feet aren't toward that surface: no boot contact
+    const up = _w1.copy(h.n);
+    if (this.vel.dot(up) > 0.8) return; // still moving away from it
     // legs absorb more than a body slam
     const vn = -this.vel.dot(up);
     if (vn > 11) this.game.damage(this, (vn - 11) * 16, null, 'landing', this.pos.clone().addScaledVector(up, -1));
@@ -501,9 +502,11 @@ export class Soldier {
     this.quat.premultiply(_q.setFromUnitVectors(bodyUp, up)).normalize();
     this.aimPitch = 0; this.aimYaw = 0;
     this.walking = true; this.holdQ = null;
+    this.walkUp = (this.walkUp || new THREE.Vector3()).copy(up);
     this.angVel.set(0, 0, 0);
     this.vel.addScaledVector(up, -this.vel.dot(up));
     this.setAimDir(view);
+    if (this.isPlayer && !world.omega) this.game.audio.play('grab');
   }
 
   leaveWalk() {
@@ -516,14 +519,16 @@ export class Soldier {
     this.jumped = false;
   }
 
-  /** Walking on the drum floor: no RCS, legs and friction do the work. */
+  /** Mag-boot walking on any surface (and the drum floor): no RCS, legs and friction do the work. */
   stepWalk(dt, world) {
     this.throttle.fill(0);
-    const up = world.upAt(this.pos, _w1);
+    if (!this.walkUp) this.walkUp = world.upAt(this.pos, new THREE.Vector3());
+    const up = _w1.copy(this.walkUp);
     const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.6, true);
-    const g = world.gravityAt(this.pos, _g1);
-    if (!h || h.n.dot(up) < 0.45 || g.length() < 0.5) { this.leaveWalk(); return; }
-    // stay upright: body up follows local up (keeps yaw)
+    if (!h || h.n.dot(up) < 0.45) { this.leaveWalk(); return; }
+    // follow the surface's own normal (the drum floor curves as you walk)
+    up.lerp(h.n, Math.min(1, dt * 12)).normalize();
+    this.walkUp.copy(up);
     const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
     this.quat.premultiply(_q.setFromUnitVectors(bodyUp, up)).normalize();
     this.angVel.set(0, 0, 0);
@@ -553,32 +558,67 @@ export class Soldier {
         if (hop) { this.vel.addScaledVector(up, 2.6); this.pos.addScaledVector(up, 0.05); this.leaveWalk(); return; }
       }
     } else { this.stuckAcc = 0; this.stuckRef = null; }
-    // jump
+    // jump off the surface into flight
     const jump = this.walkTarget ? this.walkJump : this.ctrl.move.y > 0.5;
     if (jump && this.jumpGrace <= 0) { vn = 4.5; this.walkJump = false; this.jumped = true; }
     this.vel.copy(vt).addScaledVector(up, vn);
     if (vn > 1.5) { this.pos.addScaledVector(this.vel, dt); this.leaveWalk(); return; }
-    // stand at hip height on the floor
+    // stand at hip height on the surface
     const hgt = 1.05;
     this.pos.addScaledVector(vt, dt).addScaledVector(h.n, (hgt - h.t) * Math.min(1, dt * 20));
     this.vel.addScaledVector(up, -this.vel.dot(up));
-    world.sphereContacts(this.pos, BODY_R, (n, depth, kind) => {
-      if (kind === 'wall' && n.dot(up) > 0.7) return; // the drum floor itself is handled by the stance spring
+    // walking into a wall steps the boots onto it (inside corners)
+    this.wallStepCool = Math.max(0, (this.wallStepCool || 0) - dt);
+    let stepTo = null;
+    const moveDir = _v2.copy(tgt); const ml = moveDir.length();
+    world.sphereContacts(this.pos, BODY_R, (n, depth) => {
+      if (n.dot(up) > 0.95) return; // the surface we're standing on: handled by the stance spring
+      if (ml > 1 && this.wallStepCool <= 0 && Math.abs(n.dot(up)) < 0.35 && n.dot(moveDir) / ml < -0.5 && (!this.isPlayer || this.game.settings.magBoots !== false)) stepTo = n.clone();
       this.pos.addScaledVector(n, depth);
       const vn2 = this.vel.dot(n);
       if (vn2 < 0) this.vel.addScaledVector(n, -vn2);
     });
+    if (stepTo) {
+      // tip forward onto the new surface; the old floor becomes the wall behind you
+      const view = this.aimDir(_w3).clone();
+      this.walkUp.copy(stepTo);
+      this.quat.premultiply(_q.setFromUnitVectors(_v4.set(0, 1, 0).applyQuaternion(this.quat), stepTo)).normalize();
+      this.aimPitch = 0;
+      this.setAimDir(view);
+      this.vel.set(0, 0, 0);
+      this.wallStepCool = 0.5;
+    }
+  }
+
+  /** World point the hand is holding (static surface or cargo pod), or null. */
+  grabPoint(out) {
+    const g = this.grab;
+    if (!g) return null;
+    if (g.kind === 'pod' && g.obj) return out.copy(g.offset).normalize().multiplyScalar(g.obj.r).add(g.obj.pos);
+    if (g.point) return out.copy(g.point);
+    return null;
   }
 
   /** Hand-over-hand crawl along a grabbed surface (no gas). Wraps around edges; lets go past the end of a surface. */
   crawl(dt) {
     const g = this.grab, world = this.game.world;
     this.vel.set(0, 0, 0);
-    const mv = _v.copy(this.ctrl.move);
-    if (mv.lengthSq() === 0 || !g.normal) return true;
-    mv.applyQuaternion(this.quat).normalize();
-    const out = mv.dot(g.normal);
-    mv.addScaledVector(g.normal, -out);
+    const c = this.ctrl.move;
+    if ((c.x === 0 && c.y === 0 && c.z === 0) || !g.normal) return true;
+    // view-relative crawl: W/S go "forward" along the surface as seen from your view. When you
+    // look straight at the surface, forward becomes up-the-surface (your view's up direction).
+    const n = g.normal, aq = this.aimQuat(_q);
+    const tang = (v) => v.addScaledVector(n, -v.dot(n));
+    const f = tang(_w1.set(0, 0, -1).applyQuaternion(aq));
+    const u = tang(_w2.set(0, 1, 0).applyQuaternion(aq));
+    const r = tang(_w3.set(1, 0, 0).applyQuaternion(aq));
+    const fl = f.length();
+    const fwd = fl > 0.45 ? f.divideScalar(fl) : f.lerp(u, 1 - fl / 0.45).normalize();
+    if (r.lengthSq() < 0.04) r.crossVectors(fwd, n);
+    r.normalize();
+    const mv = _v.set(0, 0, 0).addScaledVector(fwd, -c.z).addScaledVector(r, c.x);
+    if (c.y) mv.addScaledVector(u.lengthSq() > 0.04 ? u.normalize() : fwd, c.y);
+    const out = 0;
     let l = mv.length();
     if (l < 0.3 && out > 0 && g.prevNormal) {
       // key points off the surface right after an edge: keep going over the edge
@@ -643,7 +683,7 @@ export class Soldier {
     this.meleeT = Math.max(0, this.meleeT - dt);
     this.jumpGrace = Math.max(0, this.jumpGrace - dt);
     for (const st of this.towers) st.press = Math.min(1, st.press + PLENUM.refill * (1 - st.press) * dt);
-    this.adsAmt += ((this.ads && !this.grab ? 1 : 0) - this.adsAmt) * Math.min(1, dt * 9);
+    this.adsAmt += ((this.ads ? 1 : 0) - this.adsAmt) * Math.min(1, dt * 9);
     if (this.throwT > 0) {
       const before = this.throwT;
       this.throwT -= dt;
@@ -721,6 +761,21 @@ export class Soldier {
       const r = 1 - w.reloadT / w.def.reload, b = bell(r);
       gm.rotation.z = 0.55 * b; gm.rotation.x += 0.35 * b; gm.position.y -= 0.05 * b;
       la.rotation.x = 0.9 * bell(r * 1.3); la.rotation.z = -0.3 * b;
+    }
+    if (this.grab) {
+      // reach for the handhold: aim the left arm (shoulder -> hand) at the grab point
+      const gp = this.grabPoint(_w3);
+      if (gp) {
+        m.upper.updateMatrixWorld(true);
+        const tl = m.upper.worldToLocal(gp.clone()).sub(la.position);
+        if (tl.lengthSq() > 1e-4) {
+          const d0 = _v.set(0.38, -0.08, -0.68).normalize();
+          const k = Math.min(1, (this.game.time - (this.grabT0 || 0)) / 0.2);
+          la.quaternion.setFromUnitVectors(d0, tl.normalize());
+          if (k < 1) la.quaternion.slerp(_q2.identity(), 1 - k);
+        }
+        gm.rotation.z += 0.2; gm.position.y -= 0.04;
+      }
     }
     if (this.throwT > 0) {
       const p = 1 - this.throwT / THROW_TIME;

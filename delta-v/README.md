@@ -65,6 +65,15 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **Mass matters.** Weapons and gas count towards your mass. Holding a cargo pod and thrusting pushes the combined 300+ kg.
 * **The mouse turns your body directly.** The view and gun are fixed to the body. Spin from recoil, hits or lost thrusters still moves your view, until an assist (or you) counters it.
 
+### Mag boots, auto-stop and holding on
+
+* **Mag boots** (Settings, on by default): touch any surface feet-first, on any map, and the boots lock on. You walk it like a floor (WASD, mouse look with head pitch), with the RCS off. Walking into a wall tips you onto it, so inside corners carry you up walls and onto ceilings. Space jumps off into flight. The Spin Drum floor works the same way.
+* **RCS auto-stop** (Settings, or bind *Toggle RCS auto-stop*): whenever no movement key is held, the jets bring you to a stop relative to the map, in any assist mode. Holding the brake still matches a locked target.
+* **Holding on:**
+  * Your hand visibly reaches out and grips the surface (bots' arms too), and the gun goes one-handed.
+  * Crawling is view-relative: W/S move "forward" along the surface as you see it. Looking straight at a wall, W crawls up it.
+  * You can aim down sights while holding on.
+
 ### Assist modes (cycle with T)
 
 | Mode | Behaviour |
