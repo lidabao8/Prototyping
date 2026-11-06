@@ -120,6 +120,9 @@ function reticle(kind, mat, scale = 1) {
   } else if (kind === 'bars') {
     add(new THREE.PlaneGeometry(0.0034 * k, 0.0006 * k), -0.0042 * k, 0);
     add(new THREE.PlaneGeometry(0.0034 * k, 0.0006 * k), 0.0042 * k, 0);
+  } else if (kind === 'plus') {
+    // compact cross: four short arms round the centre dot, small gap so the dot stays readable
+    for (const [x, y, w, h] of [[0.0042, 0, 0.0034, 0.0007], [-0.0042, 0, 0.0034, 0.0007], [0, 0.0042, 0.0007, 0.0034], [0, -0.0042, 0.0007, 0.0034]]) add(new THREE.PlaneGeometry(w * k, h * k), x * k, y * k);
   } else if (kind === 'cross') {
     // thin crosshair with an open centre
     for (const [x, y, w, h] of [[0.006, 0, 0.007, 0.0005], [-0.006, 0, 0.007, 0.0005], [0, 0.006, 0.0005, 0.007], [0, -0.006, 0.0005, 0.007]]) add(new THREE.PlaneGeometry(w * k, h * k), x * k, y * k);
@@ -325,7 +328,22 @@ export function buildGun(id, teamColor, opts = {}) {
     B.add(BOX(0.062, 0.11, 0.022), M.gun, 0, -0.02, 0.33);
     MB.add(RB(0.036, 0.1, 0.07, 0.008), M.poly, 0, -0.05, 0);
     MB.add(BOX(0.038, 0.01, 0.05), M.coil, 0, -0.096, 0);
-    extra = floatingDot(B, M, 0.13, -0.08, M.coil, 'ring', M.coil, 0.092);
+    extra = floatingDot(B, M, 0.13, -0.08, M.coil, 'plus', M.coil, 0.092);
+    // charge readout on the gun: a row of LED segments set into the back face of the sight's foot, right
+    // under the glass, so it's in view from the hip and while aiming; they light left to right as the rails charge
+    {
+      const gz = -0.08 - 0.01, footY = 0.13 - 0.038 / 2;
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.0045, 0.0015), new THREE.MeshBasicMaterial({ color: 0x03070a }));
+      strip.position.set(0, footY - 0.0022, gz + 0.0052);
+      extra.push(strip);
+    }
+    const leds = [];
+    for (let i = 0; i < 10; i++) {
+      const led = new THREE.Mesh(new THREE.BoxGeometry(0.0038, 0.0032, 0.0012), new THREE.MeshBasicMaterial({ color: 0x0e2228 }));
+      led.position.set(-0.0225 + i * 0.005, 0.13 - 0.019 - 0.0022, -0.09 + 0.0062);
+      extra.push(led); leds.push(led);
+    }
+    ud.chargeLeds = leds;
     ud.sight.set(0, 0.13, -0.09); ud.zoom = 2.4; ud.magRest = new THREE.Vector3(0, -0.055, -0.12); ud.muzzle.set(0, 0.012, -0.86); ud.hand.set(0, -0.045, -0.38);
     ud.chargeMat = chargeMat;
   } else {

@@ -1295,6 +1295,17 @@ class Game {
     if (def.charge && ud.chargeMat) {
       const c = Math.min(1, (w.charge || 0) / def.charge);
       ud.chargeMat.color.setRGB(0.17 + 0.6 * c, 0.43 + 1.9 * c, 0.49 + 2.1 * c);
+      if (ud.chargeLeds) {
+        // LED row under the sight glass fills left to right; goes white near full; a dim
+        // "armed" pip when loaded and idle, all dark while reloading
+        const n = ud.chargeLeds.length, loaded = w.mag > 0 && w.reloadT <= 0, lit = c * n;
+        ud.chargeLeds.forEach((led, i) => {
+          const k = i; // left to right
+          const f = loaded ? Math.max(0, Math.min(1, lit - k)) : 0;
+          if (f > 0) led.material.color.setRGB(0.25 + (c > 0.8 ? 1.6 : 0.3) * f, 0.9 + 1.4 * f, 1.0 + 1.6 * f);
+          else led.material.color.setRGB(loaded && k === 0 ? 0.08 : 0.04, loaded && k === 0 ? 0.35 : 0.09, loaded && k === 0 ? 0.4 : 0.11);
+        });
+      }
       pos.z += 0.01 * c; pos.x += Math.sin(t * 61) * 0.0003 * c * c; pos.y += Math.cos(t * 53) * 0.0003 * c * c;
     }
     // maser vent: eases into a tilted pose, the cell slides out, steady steam; eases back when cool

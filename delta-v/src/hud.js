@@ -183,7 +183,6 @@ export class HUD {
       this.drawMarkers();
       this.drawVelocityMarkers();
       this.drawCrosshair(cx, cy, dt);
-      this.drawRailCharge(cx, cy);
       this.drawNumbers(dt);
       this.drawRates(cx, cy);
       this.drawTargetInfo(cx, cy);
@@ -388,30 +387,6 @@ export class HUD {
       this.text('LEAVING COMBAT AREA', cx, cy - 150, 24, (game.time * 3) % 1 < 0.6 ? DANGER : WARN, 'center', 700);
       this.text(left > 0 ? `Suit telemetry lost in ${left.toFixed(1)} s – turn back` : 'SUIT FAILING – RETURN TO THE COMBAT AREA', cx, cy - 126, 13, DANGER, 'center');
     } else if (near > 0) this.text('approaching combat-area edge', cx, cy - 150, 12, WARN, 'center');
-  }
-
-  /** Railgun charge: a segmented ring round the crosshair (also shown while aiming) with a % readout. */
-  drawRailCharge(cx, cy) {
-    const g = this.g, p = this.game.player, w = p.weapon, def = w.def;
-    if (!def.charge || !p.alive || w.reloadT > 0 || w.mag <= 0) return;
-    const c = Math.min(1, (w.charge || 0) / def.charge);
-    const R = 30, segs = 24, gapA = 0.05;
-    g.save();
-    g.lineCap = 'butt';
-    for (let i = 0; i < segs; i++) {
-      const a0 = -Math.PI / 2 + (i / segs) * Math.PI * 2 + gapA, a1 = -Math.PI / 2 + ((i + 1) / segs) * Math.PI * 2 - gapA;
-      const on = c > i / segs;
-      g.strokeStyle = on ? (c > 0.85 ? '#ffffff' : 'rgba(127,232,255,0.95)') : 'rgba(255,255,255,0.14)';
-      g.lineWidth = on ? 4 : 2;
-      g.beginPath(); g.arc(cx, cy, R, a0, a1); g.stroke();
-    }
-    if (c > 0) {
-      // soft glow that swells as it nears full
-      g.strokeStyle = `rgba(127,232,255,${0.15 + 0.35 * c})`; g.lineWidth = 10 * c;
-      g.beginPath(); g.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * c); g.stroke();
-      this.spaced(Math.round(c * 100) + '%', cx, cy + R + 18, 11, c > 0.85 ? '#ffffff' : '#9ff0ff', 'center', 700, 2);
-    } else this.spaced('HOLD', cx, cy + R + 18, 9, 'rgba(233,246,255,0.5)', 'center', 700, 3);
-    g.restore();
   }
 
   drawCrosshair(cx, cy, dt) {
@@ -711,15 +686,6 @@ export class HUD {
       for (let i = 0; i < n; i++) {
         g.fillStyle = i < w.mag ? 'rgba(233,238,242,0.85)' : 'rgba(255,255,255,0.1)';
         g.fillRect(x + 18 + i * (pwid + 2), y + 48, pwid, 14);
-      }
-    }
-    if (def.charge && w.reloadT <= 0 && w.mag > 0) {
-      // rail charge: segmented bar that fills while the trigger is held
-      const c = (w.charge || 0) / def.charge, segs = 12, ready = c >= 0.999;
-      this.spaced(c > 0 ? 'CHARGING' : 'HOLD TO CHARGE', x + 18, y + 30, 9, c > 0 ? '#9ff0ff' : '#8996a1', 'left', 700, 3);
-      for (let i = 0; i < segs; i++) {
-        g.fillStyle = c > i / segs ? (ready ? '#ffffff' : 'rgba(127,232,255,0.9)') : 'rgba(255,255,255,0.08)';
-        g.fillRect(x + 18 + i * 9, y + 36, 7, 6);
       }
     }
     if (w.reloadT > 0 && def.reload > 0) {

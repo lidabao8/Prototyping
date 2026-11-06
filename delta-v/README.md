@@ -88,8 +88,8 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **Loadout:** pick a primary and a secondary in the menu (or from the pause menu, for your next deploy). Weapon mass counts towards your suit's mass.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
   * **FL-12 flechette:** 10 pellets × 13 damage, with a tight enough pattern (aimed) to still land most pellets at medium range. Heavy kick and recoil (about 1 m/s per shot), so it doubles as an escape burn.
-  * **RG-1 railgun:** one 110-damage slug per reload (12 spare), leaving the rails at 1500 m/s.
-    * **Charging:** hold the trigger to charge for 1.5 s, and it fires itself at full charge. Let go early and the charge bleeds off. A segmented ring round the crosshair (shown even while aiming) fills with a % readout, the weapon panel has a matching bar, and the coils glow brighter as it builds. The gun only hums slightly while charging.
+  * **RG-1 railgun:** one slug per reload (12 spare), leaving the rails at 1500 m/s. Any hit kills (180 damage, so even a leg hit is lethal).
+    * **Charging:** hold the trigger to charge for 1.5 s, and it fires itself at full charge. Let go early and the charge bleeds off. The charge shows on the gun itself, not the HUD: a row of ten LEDs set into the base of the sight, just under the glass, lights left to right (white near full), and the rail coils glow brighter as it builds. A dim pip means it's loaded and ready to charge. The sight has a small cross reticle. The gun only hums slightly while charging.
     * **Kick:** about 3 m/s of push-back on your suit. The stock is braced on the shoulder, so the shove goes almost through your centre of mass: it moves you but barely spins you, with only a small view kick.
     * **Trail:** the slug leaves an ionised trail that hangs in the air for a moment.
   * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius (30 reserve rockets) and a small splash.
