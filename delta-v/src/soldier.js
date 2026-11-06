@@ -320,9 +320,12 @@ export class Soldier {
     // a remote human flies their own suit: forward the shove to their machine
     if (this.remote) { this.game.net.onImpulse(this, J, p); return; }
     if (this.grab && this.grab.kind !== 'pod') {
-      // anchored: a strong hit can knock you off the handhold
-      if (J.length() > 120) this.grab = null; else return;
+      // anchored: your own recoil is braced by the arm (never breaks the hold); a strong hit from outside can
+      // still knock you off the handhold
+      if (unintended !== 'recoil' && J.length() > 120) this.grab = null; else return;
     }
+    // mag boots: the legs take your own recoil into the surface, so firing never peels you off
+    if (this.walking && unintended === 'recoil') return;
     const m = this.mass;
     this.vel.addScaledVector(J, 1 / m);
     if (p) {
