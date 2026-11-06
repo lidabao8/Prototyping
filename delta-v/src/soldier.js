@@ -99,22 +99,55 @@ function addOutlines(root) {
   return outlines;
 }
 
+// soft plume: open flared tube (narrow at the nozzle, y = 0, widening along -y). Alpha falls off along the
+// length and toward the silhouette, with a faint moving shimmer, so it reads as gas rather than a solid cone.
+const PLUME_GEO = (() => { const g = new THREE.CylinderGeometry(0.16, 0.014, 0.6, 18, 10, true); g.translate(0, -0.3, 0); return g; })();
+const PLUME_CORE_GEO = (() => { const g = new THREE.CylinderGeometry(0.045, 0.01, 0.16, 12, 4, true); g.translate(0, -0.08, 0); return g; })();
+export const PLUME_MAT = new THREE.ShaderMaterial({
+  uniforms: { time: { value: 0 } },
+  vertexShader: `
+    varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+    void main() {
+      vUv = uv;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform float time;
+    varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+    void main() {
+      float along = 1.0 - vUv.y;                       // 0 at the nozzle, 1 at the far end
+      float facing = abs(dot(normalize(vN), normalize(vV)));
+      float soft = pow(facing, 1.6);                   // fades out toward the silhouette
+      float fall = exp(-along * 2.6) * (1.0 - along * along);
+      float shimmer = 0.8 + 0.2 * sin(vUv.x * 37.7 + time * 31.0 + along * 21.0) * sin(vUv.x * 13.0 - time * 17.0);
+      float a = soft * fall * shimmer;
+      vec3 col = mix(vec3(1.0, 1.0, 1.0), vec3(0.55, 0.82, 1.0), clamp(along * 1.6, 0.0, 1.0));
+      gl_FragColor = vec4(col * a * 2.0, a);
+    }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+});
+
 function buildModel(team) {
   const m = buildSoldier(TEAM_COLORS[team], TOWERS, NOZ_DIR);
   const root = m.root;
-  // thruster flames
-  const flameGeo = new THREE.ConeGeometry(0.055, 0.42, 6, 1, true); flameGeo.translate(0, -0.21, 0);
-  const flameMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xcfe8ff).multiplyScalar(1.6), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
+  // thruster plumes: cold-gas jets in vacuum fan out wide and fade fast, brightest right at the throat.
+  // Each nozzle gets a soft expanding sheath plus a short bright core, drawn with a soft-edged shader.
   const flames = [];
   const up = new THREE.Vector3(0, 1, 0);
   for (const t of TOWERS) {
     for (let k = 0; k < 6; k++) {
-      const f = new THREE.Mesh(flameGeo, flameMat);
+      const f = new THREE.Mesh(PLUME_GEO, PLUME_MAT);
+      const core = new THREE.Mesh(PLUME_CORE_GEO, PLUME_MAT);
+      core.userData.noOutline = true;
+      f.add(core);
       const exhaust = NOZ_DIR[k].clone().negate();
       f.quaternion.setFromUnitVectors(up, exhaust.clone().negate());
-      f.position.copy(t.pos).addScaledVector(exhaust, 0.09);
+      f.position.copy(t.pos).addScaledVector(exhaust, 0.07);
       f.visible = false;
       f.userData.noOutline = true;
+      f.userData.phase = Math.random() * 100;
       root.add(f);
       flames.push(f);
     }
@@ -748,6 +781,11 @@ export class Soldier {
     }
     const w = this.weapon;
     if (this.switchT > 0) this.switchT -= dt;
+    // railgun charge bleeds off when the trigger isn't held
+    for (const ws of this.weapons) if (ws.charge > 0 && (ws !== w || this.game.time - (ws.chargeT || 0) > 0.07)) ws.charge = Math.max(0, ws.charge - dt * 1.6);
+    // grenades come back over time
+    if (this.grenades < GRENADE.count) { this.nadeRegen = (this.nadeRegen || 0) + dt; if (this.nadeRegen >= GRENADE.regen) { this.nadeRegen = 0; this.grenades++; } }
+    else this.nadeRegen = 0;
     if (w.reloadT > 0) {
       w.reloadT -= dt;
       if (w.reloadT <= 0) {
@@ -847,11 +885,18 @@ export class Soldier {
     const pl = this.game.player;
     const outline = this.alive && !!pl && pl !== this && pl.team !== this.team && this.game.settings.outlines;
     if (outline !== this._outlined) { this._outlined = outline; for (const o of m.outlines) o.visible = outline; }
+    PLUME_MAT.uniforms.time.value = this.game.time;
     for (let i = 0; i < 24; i++) {
       const t = this.throttle[i];
       const f = m.flames[i];
-      if (t > 0.03 && this.alive) { f.visible = true; const s = 0.4 + t * 0.8 + Math.random() * 0.25; f.scale.set(0.7 + t * 0.5, s, 0.7 + t * 0.5); }
-      else f.visible = false;
+      if (t > 0.03 && this.alive) {
+        // length and spread follow the valve duty; a smooth per-nozzle flutter instead of random spikes
+        f.visible = true;
+        const ph = f.userData.phase, gt = this.game.time;
+        const flutter = 1 + 0.07 * Math.sin(gt * 47 + ph) + 0.04 * Math.sin(gt * 89 + ph * 2.3);
+        const len = (0.45 + t * 0.75) * flutter, wid = 0.55 + t * 0.6;
+        f.scale.set(wid, len, wid);
+      } else f.visible = false;
     }
   }
 }

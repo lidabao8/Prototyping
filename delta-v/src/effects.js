@@ -200,7 +200,7 @@ export class Effects {
   thrusterPuff(p, dir, vel) {
     const v = this._v.copy(dir).multiplyScalar(6 + Math.random() * 4).add(this._v2.randomDirection().multiplyScalar(1.2));
     if (vel) v.add(vel);
-    this.add.spawn(p, v, COLORS.cyan, 0.09, 0.18, { grow: 3, alpha: 0.25 });
+    this.add.spawn(p, v, COLORS.cyan, 0.07, 0.22, { grow: 5, alpha: 0.14 });
   }
 
   muzzle(p, dir, vel, big) {

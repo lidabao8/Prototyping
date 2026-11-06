@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Peer } from 'peerjs';
-import { WEAPONS } from './weapons.js';
+import { WEAPONS, GRENADE } from './weapons.js';
 import { Soldier } from './soldier.js';
 import { Bot } from './bot.js';
 
@@ -272,7 +272,7 @@ export class Net {
       case 'hurt': g.clientHurt(m); break;
       case 'hit': g.clientHit(m); break;
       case 'imp': if (g.player && g.player.alive) g.player.applyImpulse(new THREE.Vector3().fromArray(m.J), m.p ? new THREE.Vector3().fromArray(m.p) : null, false); break;
-      case 'refill': if (g.player) { for (const w of g.player.weapons) w.reserve = Math.max(w.reserve, w.def.reserve); g.player.grenades = 2; g.hud.message('AMMO RESUPPLIED', '#7dff9a', 1.6); g.audio.play('reload'); } break;
+      case 'refill': if (g.player) { for (const w of g.player.weapons) w.reserve = Math.max(w.reserve, w.def.reserve); g.player.grenades = GRENADE.count; g.hud.message('AMMO RESUPPLIED', '#7dff9a', 1.6); g.audio.play('reload'); } break;
       case 'msg': g.hud.message(m.text, m.color || '#ffcc4d', 2); break;
       case 'end': g.teamScore = m.score; g.endMatch(true, m.won); break;
       default: break;

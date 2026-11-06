@@ -6,7 +6,7 @@ import { Combat } from './combat.js';
 import { HUD } from './hud.js';
 import { Bot } from './bot.js';
 import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR, HIT_THRESH } from './soldier.js';
-import { WEAPONS, WEAPON_IDS, WEAPON_BLURB } from './weapons.js';
+import { WEAPONS, WEAPON_IDS, WEAPON_BLURB, GRENADE } from './weapons.js';
 import { Graphics, PRESETS, normalizeGfx } from './graphics.js';
 import { Net } from './net.js';
 import { buildFPArm, buildGrenade } from './models.js';
@@ -34,11 +34,11 @@ const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLim
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
 const MAP_WEIGHTS = {
-  spin: { rifle: 1.0, shotgun: 0.8, gyrojet: 0.7, recoilless: 0.75, maser: 0.9 },
-  hangar: { rifle: 1.0, shotgun: 0.95, gyrojet: 0.5, recoilless: 0.6, maser: 0.85 },
-  yard: { rifle: 1.0, shotgun: 0.3, gyrojet: 0.95, recoilless: 0.85, maser: 0.9 },
+  spin: { rifle: 1.0, shotgun: 0.8, gyrojet: 0.7, recoilless: 0.75, railgun: 0.75, maser: 0.9 },
+  hangar: { rifle: 1.0, shotgun: 0.95, gyrojet: 0.5, recoilless: 0.6, railgun: 0.7, maser: 0.85 },
+  yard: { rifle: 1.0, shotgun: 0.3, gyrojet: 0.95, recoilless: 0.85, railgun: 1.0, maser: 0.9 },
 };
-const LONG = new Set(['rifle', 'gyrojet', 'recoilless', 'maser']);
+const LONG = new Set(['rifle', 'gyrojet', 'recoilless', 'railgun', 'maser']);
 
 export function keyName(code) {
   if (!code) return '—';
@@ -669,7 +669,7 @@ class Game {
         const need = s.weapons.some((w) => w.def.kind !== 'beam' && w.reserve < w.def.reserve) || s.grenades < 2;
         if (!need) continue;
         for (const w of s.weapons) w.reserve = Math.max(w.reserve, w.def.reserve);
-        s.grenades = 2;
+        s.grenades = GRENADE.count;
         pk.cool = 20;
         if (s.isPlayer) { this.hud.message('AMMO RESUPPLIED', '#7dff9a', 1.6); this.audio.play('reload'); }
         if (s.remote) this.net.onRefill(s);
@@ -809,7 +809,7 @@ class Game {
     const loud = def.kind === 'rocket' ? 70 : def.kind === 'pellets' ? 55 : 48;
     for (const b of this.bots) b.hear(s, s.pos, loud);
     this.audio.play(def.sound, s.isPlayer ? 0 : this.distToListener(s.pos));
-    if (s.isPlayer) this.vmKick = (this.vmKick || 0) + (def.kind === 'pellets' ? 0.15 : def.kind === 'beam' ? 0 : def.id === 'recoilless' ? 0.12 : 0.025);
+    if (s.isPlayer) this.vmKick = (this.vmKick || 0) + (def.rail ? 0.2 : def.kind === 'pellets' ? 0.15 : def.kind === 'beam' ? 0 : def.id === 'recoilless' ? 0.12 : 0.025);
     if (s.isPlayer) this.vmFlash.intensity = 6;
   }
 
@@ -1293,6 +1293,12 @@ class Game {
     // small settle wobble right after a reload finishes
     const st = t - (this.settleT || -9);
     if (st > 0 && st < 0.6 && w.reloadT <= 0) { rot.x += 0.04 * Math.sin(st * 18) * Math.exp(-st * 7); }
+    // railgun: coils brighten and the gun hums / tightens into the shoulder as the rails charge
+    if (def.charge && ud.chargeMat) {
+      const c = Math.min(1, (w.charge || 0) / def.charge);
+      ud.chargeMat.color.setRGB(0.17 + 0.6 * c, 0.43 + 1.9 * c, 0.49 + 2.1 * c);
+      pos.z += 0.012 * c; pos.x += Math.sin(t * 83) * 0.0012 * c; pos.y += Math.cos(t * 71) * 0.0012 * c;
+    }
     // maser vent: eases into a tilted pose, the cell slides out, steady steam; eases back when cool
     const venting = def.kind === 'beam' && w.overheat;
     this.vmVent = (this.vmVent || 0) + ((venting ? 1 : 0) - (this.vmVent || 0)) * (1 - Math.exp(-dt * 6));

@@ -2,7 +2,7 @@
 export const WEAPONS = {
   rifle: {
     id: 'rifle', hipSpread: 0.0065, adsSpread: 0.0008, name: 'KR-7 KINETIC RIFLE', short: 'KR-7', kind: 'bullet',
-    speed: 400, projMass: 0.01, dmg: 20, headMul: 2.2, rpm: 600, mag: 30, reserve: 180, reload: 2.1,
+    speed: 300, projMass: 0.01, dmg: 20, headMul: 2.2, rpm: 600, mag: 30, reserve: 180, reload: 2.1,
     spread: 0.0016, auto: true, mass: 4.2, kick: 0.004, tracer: 0xffe6a0, tracerW: 0.03, tracerLen: 5, sound: 'rifle',
   },
   shotgun: {
@@ -24,6 +24,12 @@ export const WEAPONS = {
     splash: 4.5, splashDmg: 55, splashImpulse: 180, splashFalloff: 2,
     proximity: { radius: 2.5, arm: 8 },
   },
+  railgun: {
+    id: 'railgun', name: 'RG-1 RAILGUN', short: 'RG-1', kind: 'bullet', hipSpread: 0.014, adsSpread: 0.0002,
+    // one slug per reload; hold the trigger to charge the rails (fires itself at full charge), huge kick
+    speed: 1500, projMass: 0.05, ejecta: 260, dmg: 110, headMul: 1.6, rpm: 60, mag: 1, reserve: 12, reload: 1.9, charge: 0.9,
+    spread: 0.0002, auto: true, mass: 7.0, kick: 0.075, tracer: 0x7fe8ff, tracerW: 0.09, tracerLen: 45, sound: 'rail', rail: true,
+  },
   maser: {
     id: 'maser', hipSpread: 0.005, adsSpread: 0.0004, name: 'LM-2 MASER', short: 'LM-2', kind: 'beam',
     // continuous beam: damage per second while the trigger is held; heats 0.5/s, so ~2 s of fire from cold
@@ -32,16 +38,19 @@ export const WEAPONS = {
   },
 };
 
-export const WEAPON_IDS = ['rifle', 'shotgun', 'gyrojet', 'recoilless', 'maser'];
+export const WEAPON_IDS = ['rifle', 'shotgun', 'gyrojet', 'recoilless', 'railgun', 'maser'];
 export const WEAPON_BLURB = {
-  rifle: 'All-rounder. 400 m/s rounds, light recoil.',
-  shotgun: 'Close range. Each shot is a 0.75 m/s escape burn.',
+  rifle: 'All-rounder. 300 m/s rounds, light recoil.',
+  shotgun: 'Close to medium range. Each shot is a 1 m/s escape burn.',
   gyrojet: 'Rockets that accelerate. Deadly on slow or anchored targets.',
   recoilless: 'HE slug with a proximity fuse: bursts near enemies, blast fades fast with distance. No recoil; backblast shoves anyone behind you.',
+  railgun: 'Hold to charge, one 1500 m/s slug per reload. Hits like a truck, and kicks you back 2 m/s.',
   maser: 'Continuous yellow beam: steady damage while held, no recoil, no ammo. Overheats.',
 };
 
-export const GRENADE = { fuse: 3.5, speed: 18, mass: 0.6, radius: 9, dmg: 115, impulse: 520, restitution: 0.85, count: 2 };
+// proximity grenades: arm after `arm` s, burst when an enemy comes within `proximity` m (fuse is the backstop);
+// you carry `count`, and one comes back every `regen` s
+export const GRENADE = { fuse: 3.5, speed: 18, mass: 0.6, radius: 9, dmg: 115, impulse: 520, restitution: 0.85, count: 3, arm: 0.45, proximity: 2.8, regen: 15 };
 export const MELEE = { range: 2.4, dmg: 45, impulse: 420, spin: 4.5, cooldown: 0.9 };
 
 export class WeaponState {

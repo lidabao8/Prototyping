@@ -84,10 +84,14 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 
 ## Combat
 
-* **Recoil is propulsion.** The ejected momentum pushes you back at the muzzle, which sits off your centre of mass, so it also spins you. A 10 g round at 400 m/s gives a 125 kg soldier about 0.03 m/s. A full magazine gives about 1 m/s.
+* **Recoil is propulsion.** The ejected momentum pushes you back at the muzzle, which sits off your centre of mass, so it also spins you. A 10 g rifle round at 300 m/s gives a 125 kg soldier about 0.025 m/s. A full magazine gives about 0.7 m/s.
 * **Loadout:** pick a primary and a secondary in the menu (or from the pause menu, for your next deploy). Weapon mass counts towards your suit's mass.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
   * **FL-12 flechette:** 10 pellets × 13 damage, with a tight enough pattern (aimed) to still land most pellets at medium range. Heavy kick and recoil (about 1 m/s per shot), so it doubles as an escape burn.
+  * **RG-1 railgun:** one 110-damage slug per reload (12 spare), leaving the rails at 1500 m/s.
+    * **Charging:** hold the trigger to charge for 0.9 s, and it fires itself at full charge. Let go early and the charge bleeds off. A HUD bar shows the charge, and the coils glow brighter as it builds.
+    * **Kick:** a huge recoil kick and about 2 m/s of push-back on your suit, which also spins you.
+    * **Trail:** the slug leaves an ionised trail that hangs in the air for a moment.
   * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius (30 reserve rockets) and a small splash.
   * **RR-90 recoilless:** a single 80-damage HE slug (30 rpm, 10 spare) with no recoil and no guidance. It's slow (150 m/s), so lead your target. The slug is big: it hits anything within 0.4 m of its path, and its tracer is thick.
     * Its proximity fuse arms 8 m out and bursts at the closest approach within 2.5 m of an enemy.
@@ -95,7 +99,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
     * The backblast shoves (and hurts enemies) up to 7 m behind you.
     * Fully aimed, it switches to a full-screen scope.
   * **LM-2 maser:** a steady continuous beam (gunmetal body, yellow accents), 80 damage per second while held. No recoil, no ammo; it overheats after about 2 s of fire and vents.
-* **Grenades:** thrown at 18 m/s on a 3.5 s fuse. They fly straight, bounce elastically off walls, and leave the hand partway through a throw animation.
+* **Grenades:** you carry 3, and one comes back every 15 s (an arc fills round the next empty slot on the HUD). They're thrown at 18 m/s with a proximity fuse: after arming for 0.45 s, they burst as soon as an enemy is within 2.8 m. The 3.5 s fuse is the backstop. They fly straight, bounce elastically off walls, and leave the hand partway through a throw animation.
 * **Momentum hammer (V):** sends the target tumbling.
 * **Hip-fire vs aiming:** hip-fire spreads several times wider than aiming down the sights. Every gun has a working sight (holographic sights on the rifle, flechette and maser; scopes on the gyrojet and recoilless), aligned to the screen centre when you aim, with its own magnification. Bots aim down the sights once they've settled on a target at range.
 * **Tracers:** every round leaves the actual barrel (your viewmodel's muzzle, or a bot's gun) and converges on the crosshair point, drawn as a glowing streak.
@@ -183,6 +187,8 @@ A sticky footer shows a match summary and the Deploy button (Enter also deploys)
 * A weapon cluster with ammo pips and grenade icons.
 * Kill-feed chips and banner messages.
 * A redesigned death screen.
+
+**Thruster plumes:** each nozzle's cold-gas jet is a soft, widening plume. It's brightest at the throat and fades along its length and toward its edges, with a gentle shimmer and a smooth flutter, plus faint gas puffs. They're no longer solid cones.
 
 **Sights:** the light guns (rifle, flechette, maser) use frameless reflex sights: a bare pane of faintly tinted glass with polished edges. It stands in a slotted foot with set screws, on a riser and a rail clamp (jaws over the rail, cross-bolt and thumb nut). The emitter in the foot projects the reticle onto the glass. The gyrojet has a framed holographic sight, and the recoilless a scope with a full-screen optic.
 

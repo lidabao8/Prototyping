@@ -62,6 +62,14 @@ export class Combat {
       w.cool = 0.25;
       return false;
     }
+    if (def.charge) {
+      // railgun: hold to charge; it fires itself at full charge (letting go bleeds it off)
+      const dt = Math.min(0.05, g.frameDt || 1 / 60);
+      if (!w.charge && s.isPlayer) g.audio.play('railcharge');
+      w.charge = Math.min(def.charge, (w.charge || 0) + dt); w.chargeT = g.time;
+      if (w.charge < def.charge) return false;
+      w.charge = 0;
+    }
     w.mag--;
     w.cool = 60 / def.rpm;
     s.spawnProtect = 0;
@@ -104,12 +112,25 @@ export class Combat {
     s.kick.y += def.kick * (Math.random() - 0.5) * 0.8;
     s.addAim(def.kick * (Math.random() - 0.5) * 0.5, def.kick * (0.6 + Math.random() * 0.5));
     g.fx.muzzle(muzzle, aim, s.vel, def.kind === 'pellets');
+    if (def.rail) this.railTrail(origin, base, s);
     if (def.backblast && !g.net.isClient) this.backblast(s, aim, muzzle, def.backblast);
     if (g.net.isClient && s.isPlayer) g.net.sendFire(def, netList);
     else if (g.net.isHost) g.net.onLocalShot(s, def, netList);
     g.onShot(s, def);
     if (w.mag === 0 && w.reserve > 0) setTimeout(() => { if (s.alive && s.weapon === w) s.startReload(); }, 250);
     return true;
+  }
+
+  /** Railgun: an ionised streak that hangs along the slug's path for a moment. */
+  railTrail(origin, dir, s) {
+    const g = this.game;
+    const h = g.world.raycast(origin, dir, 400);
+    let t = h ? h.t : 400;
+    const hs = this.raySoldier(origin, dir, t, s);
+    if (hs) t = hs.t;
+    const b = { a: origin.clone(), b: origin.clone().addScaledVector(dir, t), life: 0.45, color: this.color(0x7fe8ff), width: 0.05, rail: true };
+    this.beams.push(b);
+    g.fx.sparks(b.b, 10, dir.clone().negate(), 6, this.color(0x9ff0ff));
   }
 
   /** Host: a remote player's shot, rebuilt from the origin/velocity they sent. */
@@ -121,6 +142,7 @@ export class Combat {
     this.addProjectileMesh(p);
     this.projectiles.push(p);
     this.game.fx.muzzle(pos, dir, s.vel, def.kind === 'pellets');
+    if (def.rail) this.railTrail(pos, dir, s);
   }
 
   /** Client: someone else's shot, drawn locally (no damage here; the host decides). */
@@ -132,6 +154,7 @@ export class Combat {
       const p = { pos, vel, start: pos.clone(), dir: vel.clone().normalize(), owner: s || g.player, def, age: 0, kind: def.kind, color: this.color(def.tracer), tail: def.kind === 'rocket' ? 0.02 : (def.tracerLen || 4) / def.speed, visual: true };
       this.addProjectileMesh(p);
       this.projectiles.push(p);
+      if (def.rail) this.railTrail(pos, p.dir, s || null);
     }
     if (s) { s.lastFireT = g.time; g.fx.muzzle(new THREE.Vector3().fromArray(m.list[0][0]), new THREE.Vector3().fromArray(m.list[0][1]).normalize(), s.vel, def.kind === 'pellets'); g.audio.play(def.sound, g.distToListener(s.pos)); }
   }
@@ -437,6 +460,13 @@ export class Combat {
           gr.pos.copy(s.pos).addScaledVector(n, 0.8);
         }
       }
+      // proximity fuse: once armed, an enemy inside the trigger radius sets it off
+      if (gr.fuse > 0 && GRENADE.fuse - gr.fuse > GRENADE.arm) {
+        for (const s of g.soldiers) {
+          if (!s.alive || s.team === gr.owner.team || s.spawnProtect > 0) continue;
+          if (s.pos.distanceToSquared(gr.pos) < GRENADE.proximity * GRENADE.proximity) { gr.fuse = 0; break; }
+        }
+      }
       if (gr.fuse <= 0) {
         this.explode(gr.pos, gr.owner, GRENADE.radius, GRENADE.dmg, GRENADE.impulse, 'grenade');
         g.scene.remove(gr.mesh);
@@ -570,7 +600,7 @@ export class Combat {
     for (const b of this.beams) {
       b._v = b._v || new THREE.Vector3();
       b._v.subVectors(b.b, b.a);
-      out.push({ pos: b.b, vel: b._v, color: bc, tail: 1, width: 0.035, beam: true });
+      out.push({ pos: b.b, vel: b._v, color: b.color || bc, tail: 1, width: b.rail ? b.width * Math.min(1, b.life / 0.2 + 0.2) : 0.035, beam: true });
     }
     return out;
   }

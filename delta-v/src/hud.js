@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, interceptTime, interceptTimeRocket, raySphere } from './math.js';
+import { GRENADE } from './weapons.js';
 import { GAS_MAX, MODES, TEAM_COLORS, TEAM_NAMES, TOWERS, BODY_R, HIT_THRESH, MAX_HP } from './soldier.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
@@ -687,6 +688,15 @@ export class HUD {
         g.fillRect(x + 18 + i * (pwid + 2), y + 48, pwid, 14);
       }
     }
+    if (def.charge && w.reloadT <= 0 && w.mag > 0) {
+      // rail charge: segmented bar that fills while the trigger is held
+      const c = (w.charge || 0) / def.charge, segs = 12, ready = c >= 0.999;
+      this.spaced(c > 0 ? 'CHARGING' : 'HOLD TO CHARGE', x + 18, y + 30, 9, c > 0 ? '#9ff0ff' : '#8996a1', 'left', 700, 3);
+      for (let i = 0; i < segs; i++) {
+        g.fillStyle = c > i / segs ? (ready ? '#ffffff' : 'rgba(127,232,255,0.9)') : 'rgba(255,255,255,0.08)';
+        g.fillRect(x + 18 + i * 9, y + 36, 7, 6);
+      }
+    }
     if (w.reloadT > 0 && def.reload > 0) {
       const f = def.perShell ? 1 - w.reloadT / def.reload : 1 - w.reloadT / def.reload;
       this.spaced('RELOADING', x + 18, y + 84, 10, WARN, 'left', 700, 3);
@@ -694,12 +704,17 @@ export class HUD {
     } else {
       // grenades as small hex icons
       this.spaced('GRENADES', x + 18, y + 86, 9, '#8996a1', 'left', 700, 3);
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < GRENADE.count; i++) {
         const gx = x + 100 + i * 20, gy = y + 83;
         g.beginPath();
         for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; g[k ? 'lineTo' : 'moveTo'](gx + Math.cos(a) * 6, gy + Math.sin(a) * 6); }
         g.closePath();
         if (i < p.grenades) { g.fillStyle = WARN; g.fill(); } else { g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1; g.stroke(); }
+        // the next one coming back: an arc filling round the empty slot
+        if (i === p.grenades && p.nadeRegen > 0) {
+          g.strokeStyle = 'rgba(255,204,77,0.75)'; g.lineWidth = 2;
+          g.beginPath(); g.arc(gx, gy, 8.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.nadeRegen / GRENADE.regen); g.stroke();
+        }
       }
     }
   }

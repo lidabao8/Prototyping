@@ -11,7 +11,7 @@ export const SKILLS = {
 };
 
 const ROLES = ['anchor', 'rusher', 'flanker', 'anchor', 'flanker', 'rusher'];
-const PREF_RANGE = { rifle: 28, shotgun: 6, gyrojet: 34, recoilless: 26, maser: 24 };
+const PREF_RANGE = { rifle: 28, shotgun: 8, gyrojet: 34, recoilless: 26, railgun: 42, maser: 24 };
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _q = new THREE.Quaternion();
 const CHEST = new THREE.Vector3(0, 0.2, 0), HEAD = new THREE.Vector3(0, 0.6, 0);
 
@@ -198,6 +198,7 @@ export class Bot {
       case 'rifle': v = dist < 4 ? 0.7 : 1.0; break;
       case 'gyrojet': v = dist < 9 ? 0.05 : (relSpeed < 2 || anchored) ? 1.35 : 0.55; break;
       case 'recoilless': v = dist < 9 ? 0.1 : dist < 60 ? 0.95 : 0.6; break; // proximity fuse forgives aim, but it's slow
+      case 'railgun': v = dist < 8 ? 0.15 : dist < 140 ? (anchored || relSpeed < 3 ? 1.25 : 1.0) : 0.7; break; // charge time punishes close fights
       case 'maser': v = ws.overheat ? 0 : dist < 80 ? 1.15 - ws.heat * 0.5 : 0.4; break;
       default: v = 0.5;
     }

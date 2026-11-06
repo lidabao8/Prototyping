@@ -298,6 +298,36 @@ export function buildGun(id, teamColor, opts = {}) {
     MB.add(CYL(0.052, 0.052, 0.02, 14), M.red, 0, 0, 0.08, Math.PI / 2);
     extra = scopeSight(B, M, 0.13, -0.12, 0.2, 0.022, M.red);
     ud.sight.set(0, 0.13, -0.12); ud.zoom = 2.6; ud.eyeRelief = 0.2; ud.scope = true; ud.muzzle.set(0, 0.02, -0.67); ud.magRest = new THREE.Vector3(0, 0.02, 0.52); ud.hand.set(0, -0.06, -0.3); ud.breech = true;
+  } else if (id === 'railgun') {
+    // RG-1 railgun: twin conductive rails with an open slot between them, insulating spacer blocks,
+    // a capacitor bank either side, and coils that glow brighter as the rails charge
+    const chargeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x2b6d7c) });
+    chargeMat.userData.glow = true;
+    B.add(RB(0.08, 0.1, 0.34, 0.016), M.gun, 0, 0, -0.04);
+    B.add(RB(0.07, 0.03, 0.3, 0.01), M.poly, 0, 0.06, -0.05);
+    B.add(BOX(0.05, 0.012, 0.3), M.metal, 0, 0.081, -0.06);
+    for (let i = 0; i < 10; i++) B.add(BOX(0.054, 0.005, 0.012), M.metal, 0, 0.089, -0.19 + i * 0.03);
+    for (const sy of [-1, 1]) {
+      B.add(BOX(0.048, 0.016, 0.62), M.metal, 0, 0.012 + sy * 0.024, -0.52);
+      B.add(BOX(0.056, 0.006, 0.52), M.poly, 0, 0.012 + sy * 0.036, -0.49);
+    }
+    for (let i = 0; i < 6; i++) B.add(RB(0.07, 0.07, 0.02, 0.006), M.poly, 0, 0.012, -0.25 - i * 0.09);
+    for (let i = 0; i < 5; i++) B.add(TOR(0.036, 0.004, 6, 18), chargeMat, 0, 0.012, -0.295 - i * 0.09);
+    B.add(BOX(0.012, 0.006, 0.6), chargeMat, 0, 0.012, -0.52);
+    B.add(RB(0.03, 0.03, 0.03, 0.006), M.metal, 0, 0.012, -0.84);
+    for (const sx of [-1, 1]) {
+      B.add(CYL(0.019, 0.019, 0.22, 12), M.gun, sx * 0.052, -0.022, -0.07, Math.PI / 2);
+      B.add(BOX(0.004, 0.024, 0.17), chargeMat, sx * 0.0715, -0.022, -0.07);
+    }
+    B.add(RB(0.05, 0.14, 0.07, 0.015), M.poly, 0, -0.11, 0.03, -0.28);
+    B.add(TOR(0.028, 0.005, 6, 16), M.gun, 0, -0.065, -0.03, 0, Math.PI / 2);
+    B.add(RB(0.058, 0.085, 0.2, 0.02), M.poly, 0, -0.012, 0.22);
+    B.add(BOX(0.062, 0.11, 0.022), M.gun, 0, -0.02, 0.33);
+    MB.add(RB(0.036, 0.1, 0.07, 0.008), M.poly, 0, -0.05, 0);
+    MB.add(BOX(0.038, 0.01, 0.05), M.coil, 0, -0.096, 0);
+    extra = floatingDot(B, M, 0.13, -0.08, M.coil, 'ring', M.coil, 0.092);
+    ud.sight.set(0, 0.13, -0.09); ud.zoom = 2.4; ud.magRest = new THREE.Vector3(0, -0.055, -0.12); ud.muzzle.set(0, 0.012, -0.86); ud.hand.set(0, -0.045, -0.38);
+    ud.chargeMat = chargeMat;
   } else {
     // LM-2 maser: dark angular body, exposed yellow energy cells, twin emitter prongs around a glowing core
     B.add(RB(0.085, 0.1, 0.36, 0.02), M.gun, 0, 0, -0.05);
