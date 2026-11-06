@@ -67,7 +67,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 
 ### Mag boots, auto-stop and holding on
 
-* **Mag boots** (Settings, on by default): touch any surface feet-first, on any map, and the boots lock on. You walk it like a floor (WASD, mouse look with head pitch), with the RCS off. Walking into a wall tips you onto it, so inside corners carry you up walls and onto ceilings. Space jumps off into flight. The Spin Drum floor works the same way. When the boots lock on, or you step onto a wall, the view eases round to the new 'up' with a small knee-dip instead of snapping.
+* **Mag boots** (Settings, on by default): touch any surface feet-first, on any map, and the boots lock on. You walk it like a floor (WASD, mouse look with head pitch), with the RCS off. Walking into a wall tips you onto it, so inside corners carry you up walls and onto ceilings. Space jumps off into flight. The Spin Drum floor works the same way. At an edge the boots keep hold of the lip while your body leans out up to 0.6 m past it, so you can look and shoot straight down a 90° drop. Keep walking outward for about a second to step off. When the boots lock on, or you step onto a wall, the view eases round to the new 'up' with a small knee-dip instead of snapping.
 * **RCS auto-stop** is the third assist mode (cycle with T, or pick it under Play → Flight computer): whenever no movement key is held, the jets bring you to a stop relative to the map. Holding the brake still matches a locked target.
 * **Holding on:**
   * Your hand visibly reaches out and grips the surface (bots' arms too), and the gun goes one-handed.
@@ -89,9 +89,9 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
   * **FL-12 flechette:** 10 pellets × 13 damage, with a tight enough pattern (aimed) to still land most pellets at medium range. Heavy kick and recoil (about 1 m/s per shot), so it doubles as an escape burn.
   * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius (30 reserve rockets) and a small splash.
-  * **RR-90 recoilless:** a single 55-damage HE slug (30 rpm, 10 spare) with no recoil and no guidance. The slug is big: it hits anything within 0.4 m of its path, and its tracer is thick.
+  * **RR-90 recoilless:** a single 80-damage HE slug (30 rpm, 10 spare) with no recoil and no guidance. It's slow (150 m/s), so lead your target. The slug is big: it hits anything within 0.4 m of its path, and its tracer is thick.
     * Its proximity fuse arms 8 m out and bursts at the closest approach within 2.5 m of an enemy.
-    * The 4.5 m blast falls off with distance squared: a 2 m near-miss does about 12.
+    * The 4.5 m, 55-damage blast falls off with distance squared: a 2 m near-miss does about 17.
     * The backblast shoves (and hurts enemies) up to 7 m behind you.
     * Fully aimed, it switches to a full-screen scope.
   * **LM-2 maser:** a steady continuous beam (gunmetal body, yellow accents), 80 damage per second while held. No recoil, no ammo; it overheats after about 2 s of fire and vents.
@@ -100,7 +100,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **Hip-fire vs aiming:** hip-fire spreads several times wider than aiming down the sights. Every gun has a working sight (holographic sights on the rifle, flechette and maser; scopes on the gyrojet and recoilless), aligned to the screen centre when you aim, with its own magnification. Bots aim down the sights once they've settled on a target at range.
 * **Tracers:** every round leaves the actual barrel (your viewmodel's muzzle, or a bot's gun) and converges on the crosshair point, drawn as a glowing streak.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
-* **Wall and pod impacts:** hitting a wall above 12 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
+* **Wall and pod impacts:** hitting a wall above 12 m/s does 9 damage per m/s over that (boots-first landings: 9 per m/s over 11). Visor cracks and other hit effects clear when you respawn. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
 
 ### Balance
 
@@ -230,8 +230,8 @@ These newer actions start **unbound**:
 
 * **Push off:** hold while holding on, release to launch towards your aim at up to 7 m/s.
 * **Aim down sights (toggle).**
-* **Last used weapon.**
-* **Full stop:** brake and kill rotation together.
+
+With only two weapons carried, next / previous / last-used weapon were all the same swap, so they're one **Swap weapon** bind: the mouse wheel swaps in either direction. The old *Full stop* bind (brake and kill rotation together) is gone: press both keys.
 
 ## Bots
 
@@ -240,7 +240,8 @@ Bots fly the same suit through the same thruster allocation, with the same gas b
 * **Perception:** a view cone with line-of-sight checks. They also notice bright thruster plumes, hear gunfire and explosions with position error, share callouts with their team, and turn towards whoever damaged them.
 * **Aim:** they lead with relative velocity, using a lagging and noisy velocity estimate, so targets that accelerate are harder for them to hit. They have a reaction delay before they start tracking a new target. Their aim error starts out large and settles over time, and grows while they are spinning. They turn their aim at a limited rate, fire in bursts at long range, and won't shoot through teammates.
 * **Tactics:**
-  * They pick combat positions with line of sight at the preferred range for their weapon, favouring handholds, which give stable aim, free push-offs and faster gas refill.
+  * They pick combat positions with line of sight at the preferred range for their weapon, favouring spots on a surface, which give stable aim, free push-offs and faster gas refill. They hold a good surface spot while it still sees their target instead of re-planning away from it.
+  * They arrive on surfaces either feet-first on mag boots (swinging their feet round on the way in, then walking and strafing on the surface) or with their hands. Holding on, they crawl hand over hand to nearby waypoints along the same surface and shuffle sideways mid-fight.
   * They penalise spots that several known enemies can see, spread out from teammates, and flankers take angles away from the team's line of fire.
   * Hurt bots retreat to cover that no known enemy can see.
   * Bots hunt the last known position from a flanking angle while pre-aiming it.

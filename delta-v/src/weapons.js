@@ -17,11 +17,11 @@ export const WEAPONS = {
   },
   recoilless: {
     id: 'recoilless', name: 'RR-90 RECOILLESS', short: 'RR-90', kind: 'bullet', hipSpread: 0.011, adsSpread: 0.0005,
-    speed: 260, projMass: 0.25, ejecta: 0, projRadius: 0.4, dmg: 55, headMul: 1.3, rpm: 30, mag: 1, reserve: 10, reload: 2.8,
+    speed: 150, projMass: 0.25, ejecta: 0, projRadius: 0.4, dmg: 80, headMul: 1.3, rpm: 30, mag: 1, reserve: 10, reload: 2.8,
     spread: 0.0008, auto: false, mass: 6.5, kick: 0.02, tracer: 0xff8a40, tracerW: 0.17, tracerLen: 5, sound: 'recoilless',
     backblast: { range: 7, impulse: 260, dmg: 25 },
     // HE slug with a proximity fuse: arms 8 m out, bursts within 2.5 m of an enemy; blast falls off with distance squared
-    splash: 4.5, splashDmg: 40, splashImpulse: 180, splashFalloff: 2,
+    splash: 4.5, splashDmg: 55, splashImpulse: 180, splashFalloff: 2,
     proximity: { radius: 2.5, arm: 8 },
   },
   maser: {

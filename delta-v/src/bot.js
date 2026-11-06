@@ -37,7 +37,7 @@ export class Bot {
     this.goal = null; this.goalNode = -1;
     this.goalT = 0;
     this.nextPercept = Math.random() * 0.1; this.nextThink = this.game.time + Math.random() * 0.3; this.nextPull = 0;
-    this.jink = new THREE.Vector3(); this.jinkT = 0;
+    this.jink = new THREE.Vector3(); this.jinkT = 0; this.shuffleT = 0; this.shuffleUntil = 0;
     this.burst = 0; this.burstPause = 0;
     this.combatPosT = 0;
     this.lastPos = new THREE.Vector3(); this.stuckT = 0;
@@ -247,6 +247,15 @@ export class Bot {
     const g = this.game, s = this.s, w = g.world, t = g.time;
     // a couple of plans per frame at most: the rest keep their current path and try next think
     if ((g.planBudget || 0) <= 0) { if (!this.goal) this.goalT = t; return; }
+    // a good anchor spot is worth finishing the trip to (or holding once we're on it): keep it while it
+    // still sees the target
+    if (this.state === 'engage' && this.target && this.goal && this.goalNode >= 0 && w.nav[this.goalNode].surf &&
+        this.hitsRecent < 1.5 && (this.keptGoal || 0) < 4) {
+      const tp = _v3.copy(CHEST).applyQuaternion(this.target.quat).add(this.target.pos);
+      const onIt = (s.grab || s.walking) && s.pos.distanceTo(this.goal) < 4;
+      if (w.los(onIt ? s.pos : this.goal, tp, true)) { this.keptGoal = (this.keptGoal || 0) + 1; this.goalT = t + 2.5 + Math.random(); return; }
+    }
+    this.keptGoal = 0;
     g.planBudget--;
     this.goalT = t + 3 + Math.random() * 2;
     let node = -1;
@@ -314,7 +323,7 @@ export class Bot {
       if (dist < 4) continue;
       if (!w.los(nd.pos, tp, true)) continue;
       let score = Math.abs(dist - pref) * (closer ? 0.85 : 0.5) + nd.pos.distanceTo(s.pos) * 0.3;
-      if (nd.surf) score -= 7;           // can anchor there: stable aim, free push-off, fuel regen
+      if (nd.surf) score -= 12;          // can anchor there (boots or hands): stable aim, free push-off, fuel regen
       // use the third dimension: attack from above/below the target's own plane, where it has to pitch to answer
       const off = _v.subVectors(nd.pos, tp).normalize();
       const tUp = _v2.set(0, 1, 0).applyQuaternion(tgt.quat);
@@ -407,12 +416,35 @@ export class Bot {
     const s = this.s, g = this.game, w = g.world, t = g.time;
     const ctrl = s.ctrl;
     ctrl.move.set(0, 0, 0); ctrl.roll = 0; ctrl.brake = false; ctrl.killRot = false;
+    s.crawlDir = null; this.wantUp = null;
     const fuel = s.gas / GAS_MAX;
+    // per destination: arrive on mag boots (walk it) or with the hands (grab and crawl)
+    if (this.bootsFor !== this.goalNode) { this.bootsFor = this.goalNode; this.useBoots = Math.random() < 0.55; this.arriveT = 0; }
     // anchored: decide whether to stay or push off
     if (s.grab) {
       const stay = (this.state === 'engage' && this.target && this.hitsRecent < 1.5 && this.goal && s.pos.distanceTo(this.goal) < 3) ||
         (this.state === 'refuel' && fuel < 0.6) || t < this.waitUntil;
+      if (stay && this.state === 'engage' && this.target) {
+        // shuffle along the handhold now and then so we're not a static target
+        if (t > this.shuffleT) {
+          this.shuffleT = t + rand(1.8, 3.6);
+          this.shuffleUntil = t + rand(0.6, 1.3);
+          this.shuffleDir = randomPerp(_v.subVectors(this.target.pos, s.pos).normalize(), this.shuffleDir || new THREE.Vector3());
+        }
+        if (t < this.shuffleUntil && this.shuffleDir) s.crawlDir = this.shuffleDir;
+        return;
+      }
       if (stay || !this.path || !this.path.length) return;
+      // the next stretch runs along this surface: crawl it hand over hand (no gas, low profile)
+      {
+        const wp = this.path[0], n0 = s.grab.normal;
+        const dir = _v.subVectors(wp, s.pos); const dist = dir.length();
+        if (n0 && s.grab.kind !== 'pod' && dist > 0.8 && dist < 9 && Math.abs(dir.dot(n0)) / dist < 0.45) {
+          if (dist < 1.6 && this.path.length > 1) this.path.shift();
+          s.crawlDir = dir.divideScalar(dist).clone();
+          return;
+        }
+      }
       {
         // push-off toward the furthest clear waypoint (free movement, no fuel)
         let k = 0;
@@ -443,6 +475,7 @@ export class Bot {
     } else if (this.goal) { wp = this.goal; final = true; }
 
     const vDes = _v2.set(0, 0, 0);
+    let settling = false; // closing on a surface spot to anchor: hold the jinks until we're on it
     let cruise = { engage: 3, retreat: 6, refuel: 3.5, hunt: 4.5, patrol: 5, resupply: 5.5 }[this.state] || 4.5;
     if (this.role === 'rusher' && this.state !== 'retreat') cruise *= 1.25;
     if (fuel < 0.35) cruise *= 0.65;
@@ -457,16 +490,24 @@ export class Bot {
       const vArr = final && goalNd && goalNd.surf && this.state !== 'engage' ? 2.5 : 0;
       const vmax = Math.min(cruise, Math.sqrt(vArr * vArr + 2 * aBr * Math.max(0, distToGoal - 0.6)));
       if (d > 0.01) vDes.copy(to).multiplyScalar(vmax / d);
+      // mag-boot arrival: swing the feet toward the surface on the way in; the boots lock on contact
+      const bootNd = final && this.useBoots && goalNd && goalNd.surf && goalNd.normal && !s.walking ? goalNd : null;
+      if (bootNd && d < 7) this.wantUp = bootNd.normal;
+      if (final && goalNd && goalNd.surf && d < 9) settling = true;
       if (final && d < 1.8) {
         vDes.multiplyScalar(0.3);
-        // reached: anchor on surface nodes
+        // reached: anchor on surface nodes (boots: drift the last bit feet-first onto it)
         const nd = this.goalNode >= 0 ? w.nav[this.goalNode] : null;
-        if (nd && nd.surf && !s.walking && !(w.omega && nd.normal && w.upAt(nd.pos, _v3).dot(nd.normal) > 0.7) && s.vel.length() < 3.8) { if (g.tryGrab(s)) { this.coast = false; return; } }
+        if (bootNd) {
+          this.arriveT += dt;
+          vDes.addScaledVector(bootNd.normal, -1.2);
+          if (this.arriveT > 2) this.useBoots = false; // couldn't get the boots down: use the hands
+        } else if (nd && nd.surf && !s.walking && !(w.omega && nd.normal && w.upAt(nd.pos, _v3).dot(nd.normal) > 0.7) && s.vel.length() < 3.8) { if (g.tryGrab(s)) { this.coast = false; return; } }
         if (d < 1.0 && this.state !== 'engage') { this.goal = null; this.path = null; }
       }
     }
     // combat jinking: lateral velocity changes perpendicular to the line of fire
-    if (this.state === 'engage' && this.target && fuel > 0.45) {
+    if (this.state === 'engage' && this.target && fuel > 0.45 && !settling) {
       if (t > this.jinkT) {
         const los = _v.subVectors(this.target.pos, s.pos).normalize();
         randomPerp(los, this.jink);
@@ -604,7 +645,9 @@ export class Bot {
   roll(dt) {
     const s = this.s, t = this.game.time;
     let up = null, rate = 1.3;
-    if (s.grab && s.grab.normal && s.grab.kind !== 'pod') up = s.grab.normal;
+    if (s.walking) return; // the boots set our up
+    if (this.wantUp) { up = this.wantUp; rate = 3.2; }
+    else if (s.grab && s.grab.normal && s.grab.kind !== 'pod') up = s.grab.normal;
     else {
       if (!this.upPref || t > this.upT) {
         const combat = this.state === 'engage';

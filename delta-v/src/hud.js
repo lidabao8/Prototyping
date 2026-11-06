@@ -104,6 +104,9 @@ export class HUD {
     this.nums = this.nums.filter((n) => n.life > 0);
   }
 
+  /** Clear lingering screen effects (visor cracks, red flash, hit indicators) for a fresh life. */
+  resetEffects() { this.cracks = []; this.impactT = 0; this.impactSev = 0; this.dmgDirs = []; }
+
   impact(severity) {
     this.impactT = 1; this.impactSev = Math.min(1, severity);
     if (severity > 0.25) {

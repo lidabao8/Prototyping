@@ -26,7 +26,9 @@ export const ROLL_RATE = 1.5;
 const RATE_K = 3.2;
 const TA = 0.42, TB = 0.5;       // thruster tower lateral/vertical offset (m)
 export const THROW_TIME = 0.6;  // s, grenade throw animation (released 40% in)
-export const HIT_THRESH = 12;     // m/s wall impact before damage
+export const HIT_THRESH = 12;
+const LEDGE_REACH = 0.6;   // m the body may lean out past an edge while the boots still hold the lip
+const _ledgeA = new THREE.Vector3(), _ledgeB = new THREE.Vector3(), _ledgeC = new THREE.Vector3(), _ledgeD = new THREE.Vector3();     // m/s wall impact before damage
 export const CRAWL_SPEED = 2.2;  // m/s hand-over-hand along a surface
 
 // tower positions (body frame) and signs
@@ -495,7 +497,7 @@ export class Soldier {
     if (this.vel.dot(up) > 0.8) return; // still moving away from it
     // legs absorb more than a body slam
     const vn = -this.vel.dot(up);
-    if (vn > 11) this.game.damage(this, (vn - 11) * 16, null, 'landing', this.pos.clone().addScaledVector(up, -1));
+    if (vn > 11) this.game.damage(this, (vn - 11) * 9, null, 'landing', this.pos.clone().addScaledVector(up, -1));
     if (vn > 2) this.game.onImpact(this, vn, this.pos.clone().addScaledVector(up, -1.05), up.clone());
     const view = this.aimDir(_w3).clone();
     this.beginViewBlend(0.4, 1);
@@ -530,8 +532,26 @@ export class Soldier {
     this.throttle.fill(0);
     if (!this.walkUp) this.walkUp = world.upAt(this.pos, new THREE.Vector3());
     const up = _w1.copy(this.walkUp);
-    const h = world.raycast(this.pos, _w2.copy(up).negate(), 1.6, true);
-    if (!h || h.n.dot(up) < 0.45) { this.leaveWalk(); return; }
+    let h = world.raycast(this.pos, _w2.copy(up).negate(), 1.6, true);
+    // over a ledge: the boots keep hold while the soles are still on the lip (body leaning out up to
+    // LEDGE_REACH past the edge), so you can look and shoot straight down a 90° drop
+    let edgeBack = null;
+    if (!h || h.n.dot(up) < 0.45) {
+      const t1 = _ledgeA.set(1, 0, 0); if (Math.abs(t1.dot(up)) > 0.9) t1.set(0, 0, 1);
+      t1.addScaledVector(up, -t1.dot(up)).normalize();
+      const t2 = _ledgeB.crossVectors(up, t1);
+      const back = _ledgeC.copy(this.vel).addScaledVector(up, -this.vel.dot(up));
+      let best = null, bestScore = -Infinity;
+      for (let k = 0; k < 8; k++) {
+        const a = k * Math.PI / 4, dir = new THREE.Vector3().addScaledVector(t1, Math.cos(a)).addScaledVector(t2, Math.sin(a));
+        const hh = world.raycast(_ledgeD.copy(this.pos).addScaledVector(dir, LEDGE_REACH), _w2.copy(up).negate(), 1.6, true);
+        if (!hh || hh.n.dot(up) < 0.8) continue;
+        const sc = -dir.dot(back);
+        if (sc > bestScore) { bestScore = sc; best = { h: hh, dir }; }
+      }
+      if (!best) { this.leaveWalk(); return; }
+      h = best.h; edgeBack = best.dir;
+    }
     // follow the surface's own normal (the drum floor curves as you walk)
     up.lerp(h.n, Math.min(1, dt * 12)).normalize();
     this.walkUp.copy(up);
@@ -552,10 +572,18 @@ export class Soldier {
     if (tgt.length() > 6) tgt.setLength(6);
     const vt = _v.copy(this.vel).addScaledVector(up, -this.vel.dot(up));
     vt.lerp(tgt, Math.min(1, dt * 10));
+    // at the lip: no further out than the soles allow (back toward the support is fine)
+    // keep pushing outward for a moment and you step off the lip into flight, as before
+    if (edgeBack) {
+      const out = -tgt.dot(edgeBack);
+      this.lipPush = out > 1 ? (this.lipPush || 0) + dt : 0;
+      if (this.lipPush > 1.2) { this.lipPush = 0; this.vel.copy(tgt).setLength(Math.min(2.5, tgt.length())); this.leaveWalk(); return; }
+      const away = -vt.dot(edgeBack); if (away > 0) vt.addScaledVector(edgeBack, away);
+    } else this.lipPush = 0;
     let vn = this.vel.dot(up);
     // unstick: pushing a direction but not getting anywhere for a second -> small hop
     const wants = this.walkTarget ? this.walkTarget.lengthSq() > 1 : (this.ctrl.move.x !== 0 || this.ctrl.move.z !== 0);
-    if (wants) {
+    if (wants && !edgeBack) {
       this.stuckAcc = (this.stuckAcc || 0) + dt;
       if (!this.stuckRef) this.stuckRef = this.pos.clone();
       if (this.stuckAcc > 1) {
@@ -611,6 +639,13 @@ export class Soldier {
     const g = this.grab, world = this.game.world;
     this.vel.set(0, 0, 0);
     const c = this.ctrl.move;
+    if (this.crawlDir && g.normal && g.kind !== 'pod') {
+      // bots crawl along a world direction (projected onto the surface)
+      const mv = _v.copy(this.crawlDir).addScaledVector(g.normal, -this.crawlDir.dot(g.normal));
+      if (mv.lengthSq() < 1e-4) return true;
+      mv.setLength(CRAWL_SPEED);
+      return this.crawlMove(mv, dt, world);
+    }
     if ((c.x === 0 && c.y === 0 && c.z === 0) || !g.normal) return true;
     // view-relative crawl: W/S go "forward" along the surface as seen from your view. When you
     // look straight at the surface, forward becomes up-the-surface (your view's up direction).
@@ -634,6 +669,12 @@ export class Soldier {
     }
     if (l < 1e-3) return true;
     mv.multiplyScalar(CRAWL_SPEED / l);
+    return this.crawlMove(mv, dt, world);
+  }
+
+  /** Move hand-over-hand by mv along the held surface; wraps edges, lets go past the end. */
+  crawlMove(mv, dt, world) {
+    const g = this.grab;
     this.vel.copy(mv);
     this.pos.addScaledVector(mv, dt);
     const d0 = g.dist || BODY_R + 0.2;
@@ -671,7 +712,7 @@ export class Soldier {
           const cp = self.pos.clone().addScaledVector(n, -BODY_R);
           self.game.onImpact(self, speed, cp, n.clone());
           if (speed > HIT_THRESH && self.alive) {
-            self.game.damage(self, (speed - HIT_THRESH) * 16, null, 'impact', cp);
+            self.game.damage(self, (speed - HIT_THRESH) * 9, null, 'impact', cp);
             if (self.game.rules.breaches && speed > HIT_THRESH + 2 && self.leaks.length < 3) {
               self.leaks.push({ p: _v.copy(n).negate().multiplyScalar(0.3).applyQuaternion(_q.copy(self.quat).invert()).clone(), n: n.clone().negate().applyQuaternion(_q.copy(self.quat).invert()), t: 4 });
             }
