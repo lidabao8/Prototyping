@@ -809,7 +809,7 @@ class Game {
     const loud = def.kind === 'rocket' ? 70 : def.kind === 'pellets' ? 55 : 48;
     for (const b of this.bots) b.hear(s, s.pos, loud);
     this.audio.play(def.sound, s.isPlayer ? 0 : this.distToListener(s.pos));
-    if (s.isPlayer) this.vmKick = (this.vmKick || 0) + (def.rail ? 0.2 : def.kind === 'pellets' ? 0.15 : def.kind === 'beam' ? 0 : def.id === 'recoilless' ? 0.12 : 0.025);
+    if (s.isPlayer) this.vmKick = (this.vmKick || 0) + (def.rail ? 0.13 : def.kind === 'pellets' ? 0.15 : def.kind === 'beam' ? 0 : def.id === 'recoilless' ? 0.12 : 0.025);
     if (s.isPlayer) this.vmFlash.intensity = 6;
   }
 
@@ -1295,7 +1295,7 @@ class Game {
     if (def.charge && ud.chargeMat) {
       const c = Math.min(1, (w.charge || 0) / def.charge);
       ud.chargeMat.color.setRGB(0.17 + 0.6 * c, 0.43 + 1.9 * c, 0.49 + 2.1 * c);
-      pos.z += 0.012 * c; pos.x += Math.sin(t * 83) * 0.0012 * c; pos.y += Math.cos(t * 71) * 0.0012 * c;
+      pos.z += 0.01 * c; pos.x += Math.sin(t * 61) * 0.0003 * c * c; pos.y += Math.cos(t * 53) * 0.0003 * c * c;
     }
     // maser vent: eases into a tilted pose, the cell slides out, steady steam; eases back when cool
     const venting = def.kind === 'beam' && w.overheat;

@@ -27,8 +27,8 @@ export const WEAPONS = {
   railgun: {
     id: 'railgun', name: 'RG-1 RAILGUN', short: 'RG-1', kind: 'bullet', hipSpread: 0.014, adsSpread: 0.0002,
     // one slug per reload; hold the trigger to charge the rails (fires itself at full charge), huge kick
-    speed: 1500, projMass: 0.05, ejecta: 260, dmg: 110, headMul: 1.6, rpm: 60, mag: 1, reserve: 12, reload: 1.9, charge: 0.9,
-    spread: 0.0002, auto: true, mass: 7.0, kick: 0.075, tracer: 0x7fe8ff, tracerW: 0.09, tracerLen: 45, sound: 'rail', rail: true,
+    speed: 1500, projMass: 0.05, ejecta: 400, dmg: 110, headMul: 1.6, rpm: 60, mag: 1, reserve: 12, reload: 1.9, charge: 1.5,
+    spread: 0.0002, auto: true, mass: 7.0, kick: 0.025, tracer: 0x7fe8ff, tracerW: 0.09, tracerLen: 45, sound: 'rail', rail: true,
   },
   maser: {
     id: 'maser', hipSpread: 0.005, adsSpread: 0.0004, name: 'LM-2 MASER', short: 'LM-2', kind: 'beam',
@@ -44,7 +44,7 @@ export const WEAPON_BLURB = {
   shotgun: 'Close to medium range. Each shot is a 1 m/s escape burn.',
   gyrojet: 'Rockets that accelerate. Deadly on slow or anchored targets.',
   recoilless: 'HE slug with a proximity fuse: bursts near enemies, blast fades fast with distance. No recoil; backblast shoves anyone behind you.',
-  railgun: 'Hold to charge, one 1500 m/s slug per reload. Hits like a truck, and kicks you back 2 m/s.',
+  railgun: 'Hold 1.5 s to charge, one 1500 m/s slug per reload. Hits like a truck, and shoves you back 3 m/s.',
   maser: 'Continuous yellow beam: steady damage while held, no recoil, no ammo. Overheats.',
 };
 

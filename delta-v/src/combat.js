@@ -107,7 +107,10 @@ export class Combat {
     }
     // recoil: momentum of the ejecta pushes you back, applied at the muzzle (off the centre of mass -> spin)
     const momentum = def.ejecta != null ? def.ejecta : def.projMass * def.speed;
-    s.applyImpulse(_v.copy(aim).multiplyScalar(-momentum), muzzle, 'recoil');
+    // (the railgun's stock is braced on the shoulder: its shove goes almost through the centre of mass,
+    // so it pushes you back hard but barely spins you)
+    const at = def.rail ? _v3.copy(s.pos).lerp(muzzle, 0.06) : muzzle;
+    s.applyImpulse(_v.copy(aim).multiplyScalar(-momentum), at, 'recoil');
     s.kick.x += def.kick * (0.7 + Math.random() * 0.6);
     s.kick.y += def.kick * (Math.random() - 0.5) * 0.8;
     s.addAim(def.kick * (Math.random() - 0.5) * 0.5, def.kick * (0.6 + Math.random() * 0.5));
