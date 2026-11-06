@@ -23,10 +23,11 @@ export const ACTIONS = [
   ['brake', 'Match velocity (brake)', 'KeyC'], ['killRot', 'Kill rotation', 'KeyX'], ['grab', 'Grab / release', 'KeyF'],
   ['reload', 'Reload', 'KeyR'], ['grenade', 'Grenade', 'KeyG'], ['melee', 'Momentum hammer', 'KeyV'],
   ['weapon1', 'Primary weapon', 'Digit1'], ['weapon2', 'Secondary weapon', 'Digit2'],
-  ['nextWeapon', 'Swap weapon (wheel: either direction)', 'WheelDown'],
+  ['nextWeapon', 'Next weapon', 'WheelDown'], ['prevWeapon', 'Previous weapon', 'WheelUp'],
   ['mode', 'Cycle RCS mode', 'KeyT'], ['lockRef', 'Lock velocity reference', 'KeyL'], ['grid', 'Reference grid', 'KeyH'], ['board', 'Scoreboard', 'Tab'],
   // newer actions start unbound: assign them under Controls & keybinds
   ['pushOff', 'Push off (hold while holding on)', ''], ['adsToggle', 'Aim down sights (toggle)', ''],
+  ['lastWeapon', 'Last used weapon', ''], ['fullStop', 'Full stop (brake + kill rotation)', ''],
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false, thrust: 1 };
@@ -315,6 +316,7 @@ class Game {
 
   /** Replace a <select data-seg> with segmented buttons or cards that drive the hidden select. */
   segmentify(sel, describe) {
+    if (sel._segWrap) sel._segWrap.remove();
     const kind = sel.dataset.seg;
     const wrap = document.createElement('div');
     wrap.className = 'seg' + (kind === 'map' || kind === 'mode' ? ' cards ' + kind : '');
@@ -334,6 +336,7 @@ class Game {
     });
     const refresh = () => btns.forEach((b, i) => { const on = sel.options[i].value === sel.value; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
     sel.refreshSeg = refresh;
+    sel._segWrap = wrap;
     sel.classList.add('hidden-select');
     sel.after(wrap);
     refresh();
@@ -524,9 +527,6 @@ class Game {
             this.saveSettings();
           }
           this.buildBindUI();
-    this.setupLoadoutUI();
-    this.setupMenuChrome();
-    this.setupNetUI();
         };
       });
       row.append(l, b); box.append(row);
@@ -1005,8 +1005,8 @@ class Game {
     const k = (a) => (this.bound(a) ? 1 : 0);
     c.move.set(k('right') - k('left'), k('up') - k('down'), k('back') - k('forward'));
     c.roll = k('rollLeft') - k('rollRight');
-    c.killRot = this.bound('killRot');
-    c.brake = this.bound('brake');
+    c.killRot = this.bound('killRot') || this.bound('fullStop');
+    c.brake = this.bound('brake') || this.bound('fullStop');
     if (this.pressedAct('mode')) {
       p.mode = (p.mode + 1) % MODES.length; this.settings.mode = p.mode; this.saveSettings();
       this.hud.message(`RCS MODE: ${MODES[p.mode]}`, '#ffcc4d', 2.5);
@@ -1029,11 +1029,9 @@ class Game {
     // weapons
     const nW = p.weapons.length;
     for (let i = 0; i < nW; i++) if (this.pressedAct('weapon' + (i + 1))) p.switchTo(i);
-    // two weapons: next / previous / last-used are all the same swap, so it's one bind; a wheel bind
-    // swaps on either scroll direction
-    const sw = this.settings.binds.nextWeapon;
-    const wheel = sw === 'WheelDown' || sw === 'WheelUp';
-    if (this.pressedAct('nextWeapon') || (wheel && (this.input.hit('WheelDown') || this.input.hit('WheelUp')))) p.switchTo((p.cur + 1) % nW);
+    if (this.pressedAct('nextWeapon')) p.switchTo((p.cur + 1) % nW);
+    if (this.pressedAct('prevWeapon')) p.switchTo((p.cur + nW - 1) % nW);
+    if (this.pressedAct('lastWeapon') && p.lastCur != null) p.switchTo(p.lastCur);
     if (this.pressedAct('reload')) { if (p.startReload()) this.audio.play('reload'); }
     if (this.pressedAct('grenade')) this.combat.throwGrenade(p);
     if (this.pressedAct('melee')) this.combat.melee(p);

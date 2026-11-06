@@ -236,8 +236,8 @@ These newer actions start **unbound**:
 
 * **Push off:** hold while holding on, release to launch towards your aim at up to 7 m/s.
 * **Aim down sights (toggle).**
-
-With only two weapons carried, next / previous / last-used weapon were all the same swap, so they're one **Swap weapon** bind: the mouse wheel swaps in either direction. The old *Full stop* bind (brake and kill rotation together) is gone: press both keys.
+* **Last used weapon.**
+* **Full stop:** brake and kill rotation together.
 
 ## Bots
 
