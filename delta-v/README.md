@@ -87,9 +87,9 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **Recoil is propulsion.** The ejected momentum pushes you back at the muzzle, which sits off your centre of mass, so it also spins you. A 10 g round at 400 m/s gives a 125 kg soldier about 0.03 m/s. A full magazine gives about 1 m/s.
 * **Loadout:** pick a primary and a secondary in the menu (or from the pause menu, for your next deploy). Weapon mass counts towards your suit's mass.
   * **KR-7 kinetic rifle:** rounds travel in straight lines until they hit something.
-  * **FL-12 flechette:** heavy recoil (about 0.75 m/s per shot). It doubles as an escape burn.
+  * **FL-12 flechette:** 10 pellets × 13 damage, with a tight enough pattern (aimed) to still land most pellets at medium range. Heavy kick and recoil (about 1 m/s per shot), so it doubles as an escape burn.
   * **GJ-3 gyrojet:** a tri-barrel rocket carbine with a drum magazine. Nearly recoilless. The rounds launch slowly and accelerate, have a generous 0.3 m hit radius (30 reserve rockets) and a small splash.
-  * **RR-90 recoilless:** a single 55-damage HE slug (30 rpm, 10 spare) with no recoil and no guidance.
+  * **RR-90 recoilless:** a single 55-damage HE slug (30 rpm, 10 spare) with no recoil and no guidance. The slug is big: it hits anything within 0.4 m of its path, and its tracer is thick.
     * Its proximity fuse arms 8 m out and bursts at the closest approach within 2.5 m of an enemy.
     * The 4.5 m blast falls off with distance squared: a 2 m near-miss does about 12.
     * The backblast shoves (and hurts enemies) up to 7 m behind you.
@@ -100,7 +100,7 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * **Hip-fire vs aiming:** hip-fire spreads several times wider than aiming down the sights. Every gun has a working sight (holographic sights on the rifle, flechette and maser; scopes on the gyrojet and recoilless), aligned to the screen centre when you aim, with its own magnification. Bots aim down the sights once they've settled on a target at range.
 * **Tracers:** every round leaves the actual barrel (your viewmodel's muzzle, or a bot's gun) and converges on the crosshair point, drawn as a glowing streak.
 * **Lead indicator:** rounds inherit your velocity, so the red diamond is computed from relative velocity $\vec v_{rel} = \vec v_{target} - \vec v_{you}$. For gyrojet rounds it also accounts for their acceleration.
-* **Wall and pod impacts:** hitting a wall above 8 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
+* **Wall and pod impacts:** hitting a wall above 12 m/s does 16 damage per m/s over that. A hard hit cracks your visor, flashes the screen red, shakes the camera, throws sparks, and may breach the suit. Kills caused this way are credited to whoever knocked you into it.
 
 ### Balance
 
@@ -156,10 +156,10 @@ There are also options for infinite gas and enemy outlines.
 * the support hand moves on a damped spring toward each reload pose, so it never teleports between phases, and shell-by-shell loading keeps the gun tipped steadily from round to round;
 * rifle magazine reloads: the gun tips its mag well toward you, and the hand thumbs the release and pulls the empty mag, which floats off in zero-g. A fresh mag comes from the belt pouch, turned into line under the well, pushed up and slapped home. Empty reloads end with a charging-handle rack. Each step has its own click, clack and rack sound;
 * gyrojet reloads one rocket at a time: the hand brings a rocket cartridge (steel body, glowing tip) from the belt to the loading port, pushes it in, and the drum indexes one chamber. Firing interrupts the reload once a round is loaded;
-* shell-by-shell flechette reloads, with a visible shell in the hand;
+* shell-by-shell flechette reloads: the gun lifts and rolls its loading port toward you, with a visible shell in the hand;
 * the flechette pump after each shot;
-* recoilless breech loading: the spent casing drifts out the back, and the fresh round is carried up from the belt into the open breech;
-* maser venting when overheated: the cell slides out and steam escapes;
+* recoilless breech loading: the tube swings off the shoulder and across your view, so you can see the breech. The cap opens, the spent casing slides out and drifts away, a fresh round from the belt is lined up behind the breech and pushed home, and the tube swings back;
+* maser venting when overheated: the emitter eases into a tilted pose, the cell slides out and steam escapes at a steady rate, then it eases back once cool;
 * grenade wind-up and throw;
 * hammer strikes;
 * weapon swaps;

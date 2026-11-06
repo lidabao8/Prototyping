@@ -6,9 +6,9 @@ export const WEAPONS = {
     spread: 0.0016, auto: true, mass: 4.2, kick: 0.004, tracer: 0xffe6a0, tracerW: 0.03, tracerLen: 5, sound: 'rifle',
   },
   shotgun: {
-    id: 'shotgun', hipSpread: 0.062, adsSpread: 0.036, name: 'FL-12 FLECHETTE', short: 'FL-12', kind: 'pellets',
-    speed: 320, pellets: 10, ejecta: 100, dmg: 11, headMul: 1.5, rpm: 75, mag: 6, reserve: 30, reload: 0.5, perShell: true,
-    spread: 0.045, auto: false, mass: 4.6, kick: 0.03, tracer: 0xffb860, tracerW: 0.018, tracerLen: 3, sound: 'shotgun',
+    id: 'shotgun', hipSpread: 0.05, adsSpread: 0.021, name: 'FL-12 FLECHETTE', short: 'FL-12', kind: 'pellets',
+    speed: 320, pellets: 10, ejecta: 140, dmg: 13, headMul: 1.5, rpm: 75, mag: 6, reserve: 30, reload: 0.5, perShell: true,
+    spread: 0.03, auto: false, mass: 4.6, kick: 0.055, tracer: 0xffb860, tracerW: 0.018, tracerLen: 3, sound: 'shotgun',
   },
   gyrojet: {
     id: 'gyrojet', hipSpread: 0.008, adsSpread: 0.0008, name: 'GJ-3 GYROJET', short: 'GJ-3', kind: 'rocket',
@@ -17,8 +17,8 @@ export const WEAPONS = {
   },
   recoilless: {
     id: 'recoilless', name: 'RR-90 RECOILLESS', short: 'RR-90', kind: 'bullet', hipSpread: 0.011, adsSpread: 0.0005,
-    speed: 260, projMass: 0.25, ejecta: 0, dmg: 55, headMul: 1.3, rpm: 30, mag: 1, reserve: 10, reload: 2.8,
-    spread: 0.0008, auto: false, mass: 6.5, kick: 0.02, tracer: 0xff8a40, tracerW: 0.07, tracerLen: 4, sound: 'recoilless',
+    speed: 260, projMass: 0.25, ejecta: 0, projRadius: 0.4, dmg: 55, headMul: 1.3, rpm: 30, mag: 1, reserve: 10, reload: 2.8,
+    spread: 0.0008, auto: false, mass: 6.5, kick: 0.02, tracer: 0xff8a40, tracerW: 0.17, tracerLen: 5, sound: 'recoilless',
     backblast: { range: 7, impulse: 260, dmg: 25 },
     // HE slug with a proximity fuse: arms 8 m out, bursts within 2.5 m of an enemy; blast falls off with distance squared
     splash: 4.5, splashDmg: 40, splashImpulse: 180, splashFalloff: 2,

@@ -319,7 +319,10 @@ export function buildGun(id, teamColor, opts = {}) {
     MB.add(BOX(0.032, 0.03, 0.08), M.yellow, 0, 0.0, 0);
     extra = floatingDot(B, M, 0.135, -0.05, M.yellow, 'bars', M.yellow, 0.0775);
     ud.sight.set(0, 0.135, -0.06); ud.zoom = 1.6; ud.magRest = new THREE.Vector3(-0.06, -0.005, -0.07); ud.cell = true;
-    ud.muzzle.set(0, 0.006, -0.56);
+    // emitter lens capping the core between the prongs: the beam starts here
+    B.add(CYL(0.012, 0.009, 0.014, 12), M.metal, 0, 0.006, -0.537, Math.PI / 2);
+    B.add(CYL(0.0075, 0.0075, 0.004, 12), M.yellow, 0, 0.006, -0.546, Math.PI / 2);
+    ud.muzzle.set(0, 0.006, -0.549);
   }
   const body = B.build(!opts.noShadow);
   g.add(body);

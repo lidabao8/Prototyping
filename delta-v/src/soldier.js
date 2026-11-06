@@ -26,7 +26,7 @@ export const ROLL_RATE = 1.5;
 const RATE_K = 3.2;
 const TA = 0.42, TB = 0.5;       // thruster tower lateral/vertical offset (m)
 export const THROW_TIME = 0.6;  // s, grenade throw animation (released 40% in)
-export const HIT_THRESH = 8;     // m/s wall impact before damage
+export const HIT_THRESH = 12;     // m/s wall impact before damage
 export const CRAWL_SPEED = 2.2;  // m/s hand-over-hand along a surface
 
 // tower positions (body frame) and signs
