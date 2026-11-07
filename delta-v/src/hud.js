@@ -177,6 +177,7 @@ export class HUD {
     this.drawFeed(dt);
     this.drawRoom();
     if (!p) return;
+    if (game.hardpoint) this.drawHardpoint(p);
     if (p.alive) {
       if (game.showGrid || p.angVel.length() > 1.4) { /* grid drawn in 3D */ }
       if (game.scoped) this.drawScope(cx, cy);
@@ -227,6 +228,54 @@ export class HUD {
     const mm = Math.floor(tl / 60), ss = Math.floor(tl % 60);
     this.num(`${mm}:${ss.toString().padStart(2, '0')}`, cx, y + 16, 18, tl < 60 ? WARN : '#e9eef2', 'center');
     this.spaced(`FIRST TO ${lim}`, cx, y + 33, 9, '#8996a1', 'center', 700, 3);
+  }
+
+  /** Hardpoint: status plate under the score (holder, contested, occupancy, time to move) and a world marker. */
+  drawHardpoint(p) {
+    const g = this.g, hp = this.game.hardpoint, cx = this.W / 2;
+    const mine = p.team, y = 70;
+    const inside = p.alive && hp.inside(p.pos);
+    let label, col;
+    if (hp.contested) { label = 'CONTESTED'; col = WARN; }
+    else if (hp.owner === mine) { label = 'HELD · SCORING'; col = mine === 0 ? BLUE : ORANGE; }
+    else if (hp.owner >= 0) { label = 'ENEMY HOLDING'; col = DANGER; }
+    else { label = 'NEUTRAL'; col = '#c9d3dc'; }
+    const w = 300;
+    this.plate(cx - w / 2, y, w, 30, 8, 'rgba(6,10,16,0.62)', hp.contested ? 'rgba(255,204,77,0.6)' : null);
+    this.spaced(`HARDPOINT ${hp.idx + 1}`, cx - w / 2 + 12, y + 15, 9, '#8996a1', 'left', 700, 3);
+    this.spaced(label, cx, y + 15, 11, col, 'center', 700, 3);
+    const tl = Math.max(0, hp.t), mm = Math.floor(tl / 60), ss = Math.floor(tl % 60);
+    this.num(`${mm}:${ss.toString().padStart(2, '0')}`, cx + w / 2 - 12, y + 15, 13, tl < 10 ? WARN : '#e9eef2', 'right');
+    // occupancy pips: blue / orange in the zone
+    for (const [team, dx] of [[0, -1], [1, 1]]) {
+      const n = hp.count[team] || 0;
+      for (let i = 0; i < Math.min(6, n); i++) { g.fillStyle = team === 0 ? BLUE : ORANGE; g.fillRect(cx + dx * (18 + i * 9) - 3, y + 33, 6, 4); }
+    }
+    if (inside) this.spaced('IN ZONE', cx, y + 46, 9, HUD_C, 'center', 700, 3);
+    // world marker: diamond with distance and an order, or an edge arrow when it's off-screen
+    const c = hp.center, d = p.pos.distanceTo(c);
+    const pr = this.project(c, { x: 0, y: 0 });
+    const order = hp.contested ? 'CONTESTED' : hp.owner === mine ? 'DEFEND' : 'CAPTURE';
+    const mcol = hp.contested ? WARN : hp.owner === mine ? (mine === 0 ? BLUE : ORANGE) : hp.owner >= 0 ? DANGER : '#e9f6ff';
+    if (pr.on && !inside) {
+      g.save(); g.translate(pr.x, pr.y); g.rotate(Math.PI / 4);
+      g.strokeStyle = mcol; g.lineWidth = 2; g.strokeRect(-9, -9, 18, 18);
+      g.fillStyle = mcol; g.globalAlpha = 0.25; g.fillRect(-9, -9, 18, 18); g.globalAlpha = 1;
+      g.restore();
+      this.spaced(String(hp.idx + 1), pr.x, pr.y + 1, 10, '#ffffff', 'center', 700, 0);
+      this.spaced(order, pr.x, pr.y - 22, 9, mcol, 'center', 700, 3);
+      this.spaced(`${Math.round(d)} m`, pr.x, pr.y + 22, 9, 'rgba(233,246,255,0.75)', 'center', 700, 1);
+    } else if (!pr.on) {
+      // direction in screen space (flip when behind), pinned to an ellipse round the centre
+      let dx = pr.x - cx, dy = pr.y - this.H / 2;
+      if (pr.behind) { dx = -dx; dy = -dy; }
+      const a = Math.atan2(dy, dx), rx = this.W * 0.42, ry = this.H * 0.38;
+      const ex = cx + Math.cos(a) * rx, ey = this.H / 2 + Math.sin(a) * ry;
+      g.save(); g.translate(ex, ey); g.rotate(a);
+      g.fillStyle = mcol; g.beginPath(); g.moveTo(12, 0); g.lineTo(-6, -8); g.lineTo(-2, 0); g.lineTo(-6, 8); g.closePath(); g.fill();
+      g.restore();
+      this.spaced(`${order} ${Math.round(d)} m`, ex, ey + 18, 9, mcol, 'center', 700, 2);
+    }
   }
 
   drawRoom() {

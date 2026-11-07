@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp, rand, DEG, interceptTime, interceptTimeRocket, randomPerp } from './math.js';
+import { HP } from './hardpoint.js';
 import { GAS_MAX, NOZZLE_F, THROW_TIME, MAX_HP } from './soldier.js';
 import { GRENADE, MELEE } from './weapons.js';
 
@@ -159,6 +160,7 @@ export class Bot {
     const fuel = s.gas / GAS_MAX;
     const tgt = this.target;
     const prev = this.state;
+    const hp = g.hardpoint;
     if (tgt) {
       if (this.state === 'retreat' && t < this.retreatUntil) { /* keep retreating */ }
       else if (s.health < 35 && tgt.health > 35 && t > this.retreatUntil + 3) { this.state = 'retreat'; this.retreatUntil = t + 4; }
@@ -170,8 +172,14 @@ export class Bot {
       if (pk) { this.state = 'resupply'; this.pickup = pk; }
       else if (fuel < 0.14) this.state = 'refuel';
       else if (this.state === 'refuel' && fuel < 0.55 && !freshest) this.state = 'refuel';
+      else if (hp && !(freshest && t - freshest.t < 5 && freshest.pos.distanceTo(hp.center) < HP.radius * 2.2)) this.state = 'objective';
       else if (freshest && t - freshest.t < 8) { this.state = 'hunt'; this.huntK = freshest; }
       else this.state = 'patrol';
+    }
+    // the zone moved (or we're about to rotate early): drop the old plan
+    if (hp && (this.hpIdx !== hp.idx || (this.state === 'objective' && this.earlyRot !== this.wantsEarly(hp)))) {
+      this.hpIdx = hp.idx; this.earlyRot = this.wantsEarly(hp);
+      this.goal = null; this.path = null;
     }
     if (prev !== this.state) { this.goal = null; this.path = null; this.coast = false; }
     // weapon management
@@ -250,7 +258,9 @@ export class Bot {
     if ((g.planBudget || 0) <= 0) { if (!this.goal) this.goalT = t; return; }
     // a good anchor spot is worth finishing the trip to (or holding once we're on it): keep it while it
     // still sees the target
+    const hpc = g.hardpoint ? g.hardpoint.center : null;
     if (this.state === 'engage' && this.target && this.goal && this.goalNode >= 0 && w.nav[this.goalNode].surf &&
+        (!hpc || this.goal.distanceTo(hpc) < HP.radius * 1.3) &&
         this.hitsRecent < 1.5 && (this.keptGoal || 0) < 4) {
       const tp = _v3.copy(CHEST).applyQuaternion(this.target.quat).add(this.target.pos);
       const onIt = (s.grab || s.walking) && s.pos.distanceTo(this.goal) < 4;
@@ -260,7 +270,13 @@ export class Bot {
     g.planBudget--;
     this.goalT = t + 3 + Math.random() * 2;
     let node = -1;
-    if (this.state === 'engage' && this.target) node = this.pickCombatNode(this.target);
+    const hpz = g.hardpoint;
+    // hardpoint: far from the zone and nobody right on top of us -> keep pushing to it, shooting on the way
+    const pushZone = hpz && this.state === 'engage' && this.target && s.pos.distanceTo(hpz.center) > HP.radius * 1.6 &&
+      this.target.pos.distanceTo(s.pos) > 14;
+    if (pushZone) { node = this.pickObjectiveNode(); this.goalT = t + 2; }
+    else if (this.state === 'engage' && this.target) node = this.pickCombatNode(this.target);
+    else if (this.state === 'objective') node = this.pickObjectiveNode();
     else if (this.state === 'retreat') node = this.pickCoverNode(16, true);
     else if (this.state === 'refuel') { node = this.pickCoverNode(25, true); this.goalT = t + 8; }
     else if (this.state === 'hunt' && this.huntK) node = this.pickHuntNode(this.huntK.pos);
@@ -319,12 +335,23 @@ export class Bot {
     let best = -1, bestScore = Infinity;
     // rushers and flankers search further and care more about closing to their range
     const closer = this.role !== 'anchor';
-    for (const nd of this.candidates(s.pos, closer ? 30 : 20, closer ? 44 : 36)) {
+    const hp = this.game.hardpoint;
+    let cands = this.candidates(s.pos, closer ? 30 : 20, closer ? 44 : 36);
+    if (hp) cands = cands.concat(this.candidates(hp.center, HP.radius * 1.1, 24));
+    const pull = this.role === 'anchor' ? 1.8 : this.role === 'rusher' ? 0.8 : 1.2;
+    for (const nd of cands) {
       const dist = nd.pos.distanceTo(tp);
       if (dist < 4) continue;
-      if (!w.los(nd.pos, tp, true)) continue;
-      let score = Math.abs(dist - pref) * (closer ? 0.85 : 0.5) + nd.pos.distanceTo(s.pos) * 0.3;
+      const inZone = hp && nd.pos.distanceTo(hp.center) < HP.radius * 0.85;
+      let noLos = 0;
+      if (!w.los(nd.pos, tp, true)) { if (!inZone) continue; noLos = 7; } // holding the zone beats a shot from outside it
+      let score = Math.abs(dist - pref) * (closer ? 0.85 : 0.5) + nd.pos.distanceTo(s.pos) * (hp ? 0.12 : 0.3) + noLos;
       if (nd.surf) score -= 12;          // can anchor there (boots or hands): stable aim, free push-off, fuel regen
+      if (hp) {
+        // hardpoint: a fight is only worth it from where you also hold (or contest) the zone
+        const dz = nd.pos.distanceTo(hp.center);
+        score += dz < HP.radius * 0.85 ? -10 : (dz - HP.radius * 0.85) * pull;
+      }
       // use the third dimension: attack from above/below the target's own plane, where it has to pitch to answer
       const off = _v.subVectors(nd.pos, tp).normalize();
       const tUp = _v2.set(0, 1, 0).applyQuaternion(tgt.quat);
@@ -344,6 +371,23 @@ export class Bot {
       if (score < bestScore) { bestScore = score; best = nd.i; }
     }
     return best;
+  }
+
+  /** Hardpoint: are we one of the bots that heads for the next zone in the last seconds? */
+  wantsEarly(hp) { return this.state === 'objective' && hp.t < 10 && this.role !== 'anchor' && hp.owner !== this.s.team; }
+
+  /** Hardpoint: a spot inside the zone (or the next one when rotating early): covered, holdable, spread out. */
+  pickObjectiveNode() {
+    const s = this.s, g = this.game, w = g.world, hp = g.hardpoint;
+    const c = this.wantsEarly(hp) ? hp.pts[(hp.idx + 1) % hp.pts.length] : hp.center;
+    let best = -1, bestScore = Infinity;
+    for (const nd of this.candidates(c, HP.radius * 0.9, 40)) {
+      let score = this.exposure(nd) * 10 + nd.pos.distanceTo(c) * 0.4 + nd.pos.distanceTo(s.pos) * 0.05;
+      if (nd.surf) score -= 6;
+      score += this.teammatePenalty(nd.pos) * 1.5 + Math.random() * 3;
+      if (score < bestScore) { bestScore = score; best = nd.i; }
+    }
+    return best >= 0 ? best : w.nearestNode(c, false);
   }
 
   pickCoverNode(r, preferSurf) {
@@ -424,6 +468,7 @@ export class Bot {
     // anchored: decide whether to stay or push off
     if (s.grab) {
       const stay = (this.state === 'engage' && this.target && this.hitsRecent < 1.5 && this.goal && s.pos.distanceTo(this.goal) < 3) ||
+        (this.state === 'objective' && this.goal && s.pos.distanceTo(this.goal) < 3) ||
         (this.state === 'refuel' && fuel < 0.6) || t < this.waitUntil;
       if (stay && this.state === 'engage' && this.target) {
         // shuffle along the handhold now and then so we're not a static target
@@ -477,8 +522,10 @@ export class Bot {
 
     const vDes = _v2.set(0, 0, 0);
     let settling = false; // closing on a surface spot to anchor: hold the jinks until we're on it
-    let cruise = { engage: 3, retreat: 6, refuel: 3.5, hunt: 4.5, patrol: 5, resupply: 5.5 }[this.state] || 4.5;
+    let cruise = { engage: 3, retreat: 6, refuel: 3.5, hunt: 4.5, patrol: 5, resupply: 5.5, objective: 5.5 }[this.state] || 4.5;
     if (this.role === 'rusher' && this.state !== 'retreat') cruise *= 1.25;
+    // hardpoint: get to the zone quickly even mid-fight (shooting on the move)
+    if (g.hardpoint && this.goal && this.state === 'engage' && s.pos.distanceTo(this.goal) > 12) cruise = Math.max(cruise, 5);
     if (fuel < 0.35) cruise *= 0.65;
     if (this.coast) cruise = Math.max(cruise, s.vel.length());
     if (wp) {
@@ -504,7 +551,7 @@ export class Bot {
           vDes.addScaledVector(bootNd.normal, -1.2);
           if (this.arriveT > 2) this.useBoots = false; // couldn't get the boots down: use the hands
         } else if (nd && nd.surf && !s.walking && !(w.omega && nd.normal && w.upAt(nd.pos, _v3).dot(nd.normal) > 0.7) && s.vel.length() < 3.8) { if (g.tryGrab(s)) { this.coast = false; return; } }
-        if (d < 1.0 && this.state !== 'engage') { this.goal = null; this.path = null; }
+        if (d < 1.0 && this.state !== 'engage' && this.state !== 'objective') { this.goal = null; this.path = null; }
       }
     }
     // combat jinking: lateral velocity changes perpendicular to the line of fire

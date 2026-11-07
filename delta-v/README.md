@@ -6,6 +6,19 @@ Two squads of EVA soldiers fight in orbit, on one of three maps:
 * **Spin Drum:** a rotating station with centrifugal gravity.
 * **Derelict Yard:** an open 300 m field of station modules, trusses, container clusters and asteroids. There are no walls, so you're warned when you leave the combat area, and your suit starts failing after 5 s outside it.
 
+## Game modes
+
+Pick one under **Play → Game mode**.
+
+* **Team Deathmatch:** kills score, and the first team to the score limit wins.
+* **Hardpoint:** one capture zone at a time, a 7 m sphere.
+  * **Scoring:** your team scores a point a second while only your players are inside. If both teams are inside, it's contested and nobody scores. Kills don't score, though you still get personal points for them and for time on the point.
+  * **Rotation:** the zone moves every 60 s through four spots spread across the middle of the map: the centre first, then alternating sides, with which side comes first random per match. You get a warning 10 s before it moves.
+  * **Score limit:** five times the menu setting (75 / 150 / 250).
+  * **In the world:** a clear sphere with glowing rings and a beacon. It's white when neutral, takes the holding team's colour, and pulses yellow while contested.
+  * **On the HUD:** a plate under the score shows the zone number, its status (neutral / held / enemy holding / contested), how many from each team are inside, and the time until it moves. A world marker with distance says CAPTURE, DEFEND or CONTESTED, with an edge arrow when the zone is off-screen.
+  * **Multiplayer:** the host runs the zone and sends it to clients with the match setup and every snapshot.
+
 ### Spin Drum
 
 The station is a 72 m-diameter, 140 m-long drum spinning about its long axis at 2.25 rpm (Ω ≈ 0.24 rad/s), within the range real station designs consider comfortable. The game runs in the drum's rotating frame, so the station stands still and the stars wheel past two window bands.
@@ -243,6 +256,12 @@ These newer actions start **unbound**:
 
 Bots fly the same suit through the same thruster allocation, with the same gas budget, head cone and limited body-turn rate. Nothing about their movement is scripted.
 
+* **Hardpoint:** bots play the objective.
+  * With no target in sight they go to the zone and take covered, holdable spots inside it, spread out from their teammates. They stay there instead of wandering, and only chase sightings that are near the zone.
+  * In a fight, positions in or near the zone are strongly preferred (anchors hug it, rushers range a little further). A spot inside the zone is worth taking even without a shot.
+  * Far from the zone and with no enemy within 14 m, they keep pushing toward it and shoot on the way.
+  * When the zone moves, everyone re-plans. In the last 10 s, rushers and flankers head to the next zone early.
+  * In bot-only test matches the zone is held about two-thirds of the time, with even scores (e.g. 62–56 after 3 minutes in the hangar).
 * **Perception:** a view cone with line-of-sight checks. They also notice bright thruster plumes, hear gunfire and explosions with position error, share callouts with their team, and turn towards whoever damaged them.
 * **Aim:** they lead with relative velocity, using a lagging and noisy velocity estimate, so targets that accelerate are harder for them to hit. They have a reaction delay before they start tracking a new target. Their aim error starts out large and settles over time, and grows while they are spinning. They turn their aim at a limited rate, fire in bursts at long range, and won't shoot through teammates.
 * **Tactics:**

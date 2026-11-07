@@ -7,6 +7,7 @@ import { HUD } from './hud.js';
 import { Bot } from './bot.js';
 import { Soldier, MODES, MODE_DESC, TEAM_COLORS, TEAM_NAMES, BODY_R, makeGunMesh, TOWERS, NOZ_DIR, HIT_THRESH } from './soldier.js';
 import { WEAPONS, WEAPON_IDS, WEAPON_BLURB, GRENADE } from './weapons.js';
+import { Hardpoint, pickHardpoints, HP } from './hardpoint.js';
 import { Graphics, PRESETS, normalizeGfx } from './graphics.js';
 import { Net } from './net.js';
 import { buildFPArm, buildGrenade } from './models.js';
@@ -31,7 +32,7 @@ export const ACTIONS = [
 ];
 const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map((a) => [a[0], a[2]]));
 const DEFAULT_RULES = { recoil: true, breaches: true, knockback: true, thrusterDamage: true, infiniteGas: false, thrust: 1 };
-const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, magBoots: true, gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
+const DEFAULTS = { sens: 1.0, difficulty: 'hard', mode: 1, teamSize: 5, scoreLimit: 30, volume: 0.6, fov: 80, invertY: false, outlines: true, map: 'hangar', loadout: ['rifle', 'shotgun'], dmgNumbers: true, magBoots: true, gameMode: 'tdm', gfx: { preset: 'medium', ...PRESETS.medium, dynamic: true } };
 
 // how well each weapon suits each map (bots weight their loadout picks by this)
 const MAP_WEIGHTS = {
@@ -250,6 +251,10 @@ class Game {
     sel('optScore', 'scoreLimit', Number);
     sel('optMode', 'mode', Number);
     sel('optMap', 'map');
+    sel('optGameMode', 'gameMode');
+    const GM_DESC = { tdm: 'Kills score. First team to the score limit wins.', hardpoint: `Hold the zone: a point a second while only your team is inside it (both teams inside = contested, nobody scores). It moves every ${HP.rotate} s. Kills don't score.` };
+    $('gameModeDesc').textContent = GM_DESC[st.gameMode] || '';
+    $('optGameMode').addEventListener('change', () => { $('gameModeDesc').textContent = GM_DESC[st.gameMode] || ''; if (this.refreshSummary) this.refreshSummary(); });
     this.setupGraphicsUI();
     $('mapDesc').textContent = MAPS[st.map].desc;
     $('optMap').addEventListener('change', () => { $('mapDesc').textContent = MAPS[st.map].desc; });
@@ -358,7 +363,7 @@ class Game {
     const st = this.settings;
     const summary = () => {
       const el = $('matchSummary'); if (!el) return;
-      el.innerHTML = `<span>MAP <b>${MAPS[st.map].name.toUpperCase()}</b></span><span>BOTS <b>${st.difficulty.toUpperCase()}</b></span><span>THRUST <b>${Math.round((st.rules.thrust || 1) * 100)}%</b></span><span><b>${st.teamSize}V${st.teamSize}</b></span><span>FIRST TO <b>${st.scoreLimit}</b></span><span>LOADOUT <b>${st.loadout.map((w) => WEAPONS[w].short).join(' + ')}</b></span>`;
+      el.innerHTML = `<span>MAP <b>${MAPS[st.map].name.toUpperCase()}</b></span><span>BOTS <b>${st.difficulty.toUpperCase()}</b></span><span>THRUST <b>${Math.round((st.rules.thrust || 1) * 100)}%</b></span><span><b>${st.teamSize}V${st.teamSize}</b></span><span><b>${st.gameMode === 'hardpoint' ? 'HARDPOINT' : 'TDM'}</b></span><span>FIRST TO <b>${st.gameMode === 'hardpoint' ? st.scoreLimit * HP.limitMul : st.scoreLimit}</b></span><span>LOADOUT <b>${st.loadout.map((w) => WEAPONS[w].short).join(' + ')}</b></span>`;
     };
     for (const id of ['optMap', 'optDiff', 'optTeam', 'optScore', 'optPri', 'optSec']) { const el = $(id); if (el) el.addEventListener('change', summary); }
     this.refreshSummary = summary;
@@ -592,6 +597,7 @@ class Game {
     for (const g of this.combat.grenades) this.scene.remove(g.mesh);
     this.combat.projectiles.length = 0; this.combat.grenades.length = 0;
     this.soldiers = []; this.bots = []; this.player = null;
+    if (this.hardpoint) { this.hardpoint.dispose(); this.hardpoint = null; }
     this.intel = [new Map(), new Map()];
     this.netSoldiers = new Map();
   }
@@ -612,6 +618,10 @@ class Game {
     this.endT = 0;
     this.scoreLimit = st.scoreLimit;
     this.timeLimit = 10 * 60;
+    if (st.gameMode === 'hardpoint') {
+      this.scoreLimit = st.scoreLimit * HP.limitMul;
+      this.hardpoint = new Hardpoint(this, pickHardpoints(this.world));
+    }
     this.matchTime = 0;
     const names = CALLSIGNS.slice().sort(() => Math.random() - 0.5);
     this.player = new Soldier(this, 0, this.net.isHost ? this.callsign() : 'YOU', true);
@@ -632,7 +642,8 @@ class Game {
     this.state = 'playing';
     this.show(null);
     this.hud.feed = []; this.hud.msgs = [];
-    this.hud.message('TEAM DEATHMATCH – ZERO-G', '#9fe8ff', 3, true);
+    this.hud.message(this.hardpoint ? 'HARDPOINT – ZERO-G' : 'TEAM DEATHMATCH – ZERO-G', '#9fe8ff', 3, true);
+    if (this.hardpoint) this.hud.message('CAPTURE AND HOLD THE ZONE', '#ffcc4d', 3);
     this.hud.message(`RCS MODE: ${MODES[this.player.mode]}`, '#ffcc4d', 3);
     this.lock();
     try { this.renderer.compile(this.scene, this.camera); } catch (e) { /* optional warm-up */ }
@@ -728,6 +739,7 @@ class Game {
     if (this.world.mapId !== m.cfg.map) { this.world.dispose(); this.world = new World(this.scene, m.cfg.map); this.buildGrid(); this.applyGraphics(); }
     this.netRules = m.cfg.rules;
     this.scoreLimit = m.cfg.scoreLimit; this.timeLimit = m.cfg.timeLimit;
+    if (m.cfg.hp) this.hardpoint = new Hardpoint(this, m.cfg.hp.map((a) => new THREE.Vector3(a[0], a[1], a[2])));
     this.teamScore = [0, 0]; this.matchTime = 0; this.weaponKills = {};
     this.buildPickups();
     this.player = new Soldier(this, m.team, this.callsign(), true, m.id);
@@ -887,7 +899,7 @@ class Game {
     if (killer && killer.team !== s.team) {
       killer.kills++; killer.score += 100;
       if (WEAPONS[cause]) this.weaponKills[cause] = (this.weaponKills[cause] || 0) + 1;
-      this.teamScore[killer.team]++;
+      if (!this.hardpoint) this.teamScore[killer.team]++;
       if (killer.isPlayer) this.hud.message(`ELIMINATED ${s.name}${head ? ' – HEADSHOT' : ''}`, '#ff4b3a', 1.8);
     }
     s.killedBy = killer; s.killCause = cause;
@@ -895,7 +907,7 @@ class Game {
     this.net.onKill(killer, s, cause, head);
     if (s.bot) s.bot.target = null;
     for (const m of this.intel) m.delete(s.id);
-    if (this.teamScore[0] >= this.scoreLimit || this.teamScore[1] >= this.scoreLimit) setTimeout(() => this.endMatch(), 1200);
+    if (!this.hardpoint && (this.teamScore[0] >= this.scoreLimit || this.teamScore[1] >= this.scoreLimit)) setTimeout(() => this.endMatch(), 1200);
   }
 
   endMatch(fromNet = false, netWon = null) {
@@ -1151,6 +1163,7 @@ class Game {
         }
       }
       if (this.matchTime >= this.timeLimit) this.endMatch();
+      if (this.hardpoint && this.state === 'playing') this.hardpoint.update(dt);
       this.updatePickups(dt);
       this.updateSpawnShields(dt);
       this.emitThrusterFx(dt);
@@ -1161,6 +1174,7 @@ class Game {
     }
     if (this.state === 'ending') this.tickEnding(dt);
     this.world.updateBarriers(this.time);
+    if (this.hardpoint) this.hardpoint.sync(this.time);
     // the stars wheel past the windows of a spinning station (we live in its rotating frame)
     if (this.world.omega && this.world.space) this.world.space.rotation.x = -this.world.omega * this.time;
     if (this.state !== 'paused') this.combat.syncMeshes(dt);

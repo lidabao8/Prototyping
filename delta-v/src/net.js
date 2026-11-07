@@ -112,7 +112,7 @@ export class Net {
     s.remote = conn;
     conn.send({
       t: 'welcome', id: s.id, team: s.team, room: this.room,
-      cfg: { map: g.world.mapId, rules: st.rules, scoreLimit: g.scoreLimit, timeLimit: g.timeLimit },
+      cfg: { map: g.world.mapId, rules: st.rules, scoreLimit: g.scoreLimit, timeLimit: g.timeLimit, hp: g.hardpoint ? g.hardpoint.pts.map((p) => [p.x, p.y, p.z]) : null },
       roster: this.roster(),
     });
     this.sendSpawn(s);
@@ -216,6 +216,7 @@ export class Net {
       s: g.soldiers.map((s) => this.packSoldier(s)),
       pods: g.world.pods.map((p) => v3(p.pos)),
       pk: (g.pickups || []).map((p) => r3(p.cool)),
+      hp: g.hardpoint ? g.hardpoint.netState() : null,
     };
     for (const c of this.clients.values()) {
       const s = c.soldier;
@@ -284,6 +285,7 @@ export class Net {
     const g = this.game;
     if (!g.player) return;
     g.teamScore = m.sc; g.matchTime = m.mt;
+    if (m.hp && g.hardpoint) g.hardpoint.applyNet(m.hp);
     for (const rec of m.s) g.ensureNetSoldier(rec);
     const me = m.me, p = g.player;
     if (me) {
