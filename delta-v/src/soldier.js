@@ -215,6 +215,7 @@ export class Soldier {
     this.walking = false; this.jumpGrace = 0; this.walkTarget = null;
     this.lastDamageT = -99;
     this.lastThrustT = -99;
+    this.floorRestT = 0;
     this.lastAttacker = null;
     this.spawnProtect = 2.0;
     this.kick = new THREE.Vector2();
@@ -305,11 +306,15 @@ export class Soldier {
     if (this.holdQ) this.holdQ.multiply(_q).normalize();
   }
 
-  spawn(pos, facing) {
+  spawn(pos, facing, up = null) {
     this.reset();
     this.alive = true;
     this.pos.copy(pos);
-    this.quat.setFromUnitVectors(new THREE.Vector3(0, 0, -1), facing.clone().normalize());
+    if (up) {
+      // stand upright on the local floor: body -z along facing, +y along up
+      const f = facing.clone().normalize(), r = new THREE.Vector3().crossVectors(f, up).normalize(), u = new THREE.Vector3().crossVectors(r, f);
+      this.quat.setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, u, f.negate()));
+    } else this.quat.setFromUnitVectors(new THREE.Vector3(0, 0, -1), facing.clone().normalize());
     this.model.root.visible = !this.isPlayer;
     this.walking = false; this.aimPitch = 0; this.aimYaw = 0;
   }
@@ -525,6 +530,7 @@ export class Soldier {
   /** Mag boots: touching any surface feet-first locks you onto it (walk it like a floor). */
   tryLand(world) {
     if (this.jumpGrace > 0) return;
+    if (world.omega && this.floorRestT > 0.8 && this.restN) { this.standUp(); return; }
     if (this.isPlayer && this.game.settings.magBoots === false) return;
     const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
     const h = world.raycast(this.pos, _w2.copy(bodyUp).negate(), 1.3, true);
@@ -545,6 +551,25 @@ export class Soldier {
     this.vel.addScaledVector(up, -this.vel.dot(up));
     this.setAimDir(view);
     if (this.isPlayer && !world.omega) this.game.audio.play('grab');
+  }
+
+  /**
+   * Spinning map: lying still on a floor that gravity presses you into, you get up onto your feet. Legs
+   * and hands do it, no gas needed, so an empty tank can't leave you stranded on your back.
+   */
+  standUp() {
+    const n = this.restN;
+    const bodyUp = _v4.set(0, 1, 0).applyQuaternion(this.quat);
+    const view = this.aimDir(_w3).clone();
+    this.beginViewBlend(0.6, 1);
+    this.quat.premultiply(_q.setFromUnitVectors(bodyUp, n)).normalize();
+    this.aimPitch = 0; this.aimYaw = 0;
+    this.walking = true; this.holdQ = null;
+    this.walkUp = (this.walkUp || new THREE.Vector3()).copy(n);
+    this.angVel.set(0, 0, 0);
+    this.vel.addScaledVector(n, -this.vel.dot(n));
+    this.setAimDir(view);
+    this.floorRestT = 0;
   }
 
   /** Camera eases from the current view to the new one instead of snapping (mag boots lock / wall step). */
@@ -730,7 +755,10 @@ export class Soldier {
   collide(dt, world) {
     const self = this;
     this.impactCool -= dt;
+    let rest = false;
     world.sphereContacts(this.pos, BODY_R, (n, depth, kind) => {
+      // spinning map: resting on a surface the spin presses you into (the floor, a roof)
+      if (world.omega && self.vel.lengthSq() < 2.25 && n.dot(world.upAt(self.pos, _v3)) > 0.7) { rest = true; (self.restN || (self.restN = new THREE.Vector3())).copy(n); }
       self.pos.addScaledVector(n, depth);
       const vn = self.vel.dot(n);
       if (vn < 0) {
@@ -756,6 +784,8 @@ export class Soldier {
         }
       }
     });
+    // contacts flicker while settling, so the timer decays instead of resetting
+    this.floorRestT = rest ? (this.floorRestT || 0) + dt : Math.max(0, (this.floorRestT || 0) - dt * 0.5);
   }
 
   /** Called once per frame (not per substep). */

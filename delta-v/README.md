@@ -1,10 +1,13 @@
 # DELTA-V — zero-g team deathmatch
 
-Two squads of EVA soldiers fight in orbit, on one of three maps:
+Two squads of EVA soldiers fight in orbit, on one of six maps:
 
 * **Hangar Bay:** an enclosed 144 m hall.
 * **Spin Drum:** a rotating station with centrifugal gravity.
 * **Derelict Yard:** an open 300 m field of station modules, trusses, container clusters and asteroids. There are no walls, so you're warned when you leave the combat area, and your suit starts failing after 5 s outside it.
+* **Carousel:** a 120 m habitat wheel with centrifugal gravity. Its rim street loops all the way round, and the floor curves up into the ceiling ahead of you.
+* **The Warren:** close quarters. A hall packed with a 3D grid of blocks, with 6 m lanes on every axis.
+* **Dry Dock:** long range. A 300 m ship frame in a 420 m gantry, with a covered lane inside the frame and open lanes outside it.
 
 ## Game modes
 
@@ -26,9 +29,41 @@ The station is a 72 m-diameter, 140 m-long drum spinning about its long axis at 
 * **Gravity:** centrifugal acceleration Ω²r points outward from the axis. It's about 0.2 g on the rim and fades to zero at the centre. The RCS can climb against it.
 * **Floating:** RCS works as everywhere else, but you also feel the centrifugal pull and Coriolis drift (−2Ω×v). A slow fall curves sideways, and grenades arc. Bullets fly straight, as a gameplay simplification.
 * **Unsticking:** walking resolves every obstacle except the drum floor itself, so you can't wedge into crate edges. If you push a direction but don't move for a second, a small hop frees you.
+* **Getting up:** lie still for a moment on a floor the spin presses you into (on your back, side or front), and you get up onto your feet and start walking. No gas is needed, so an empty tank can't strand you.
 * **Landing:** touch the floor feet-down and you switch to normal walking: WASD, mouse look with head pitch, and the RCS shuts off. Jump (Space) to push off the floor straight into flight mode, with the RCS back online; you only land again when coming down onto the floor. Legs absorb landings up to 11 m/s, and a fall from the axis arrives at about 8.5 m/s. Landing on your back or head just bounces you.
 * **Layout:** cover stands on the floor in four streets around the drum (low walls, crates, two-storey blocks). The zero-g core has a central hub, spokes, an axial truss, floating low-gravity platforms and crates.
 * **Bots:** they walk the floor (jumping when their path climbs) and fly the core, cancelling the spin forces with their jets as far as thrust allows. There is no "up", and nothing gives you momentum for free: every burn, shot, push-off and suit leak changes your trajectory.
+
+### Carousel
+
+A habitat wheel 120 m across and 28 m deep, spinning about its axle at 1.7 rpm (Ω ≈ 0.18 rad/s). The teams spawn on opposite sides of the rim.
+
+* **Gravity:** about 0.2 g on the rim, 0.15 g on the ceiling deck, 0.11 g on the core's decks and zero at the hub. A fall from the hub lands at about 10.8 m/s, just inside what legs absorb. Coriolis drift is gentler than on the Spin Drum, because the wheel spins slower.
+* **The rim street (r 46–60 m):** it runs all the way round, so there are two routes between the bays: the amber north street and the teal south street. The south street is the north one turned over (its buildings stand against the other wall), and every street and core piece is mirrored between the teams.
+  * The floor curving up into the ceiling limits any view along the street to about 77 m. Standing on the floor, the ground ahead rises out of sight after about 14 m.
+  * Each half of a street has barricades, a two-storey block with a walkable roof, crates, a bulkhead frame with two 6 m doors, and a team-coloured bulkhead just outside each bay.
+* **Skylights:** openings in the ceiling deck at the midfields, halfway along each street and above each bay. Their rims glow, and they're the only way between the street and the core. A ladder spoke runs from the hub down through each midfield skylight to the floor.
+* **The core (r < 44 m):** a zero-g hub with four spokes, a rail hoop to crawl round, low-g decks facing the axle, fins and drifting crates. Each bay has three exits: both ways along the street, and up through its skylight.
+* **Orientation:** the north half is lit amber and the south half teal, on the floor strips, the blocks, the skylight rims and the glyphs on the solid end cap. The other end cap is a window ring onto the wheeling stars.
+* **Hardpoint:** hand-placed zones. The first is on the north street, then one on each team's side of the core, then the south street.
+
+### The Warren
+
+Close quarters in a 112 × 48 × 48 m hall, with spawn to spawn about 100 m.
+
+* **The block grid:** blocks sit on a 16 m pitch, leaving 6 m lanes on all three axes and a junction every 16 m. At 8 m/s, that's about one and a half stopping distances.
+* **Rooms:** the block in the middle is missing, which leaves a 22 m reactor chamber with lanes opening onto it from every face. A hollow team-coloured room stands beside it on each side, with a 4 m door in each of its six faces. Four more missing blocks make atriums with ammo depots.
+* **Sightlines:** every lane along x has two 3 m pillars at its junctions, so no lane runs from spawn to spawn. Each spawn bulkhead has five 6 m doors.
+* **Orientation:** every hull wall has its own colour: blue and orange at the team ends, an amber deck, a pale ceiling, green at −z and violet at +z. Blocks are coloured by layer (yellow low, grey middle, teal high), and the light belt round each block names its row in the matching wall colour. White strips on the deck and ceiling run along the lanes toward the enemy.
+
+### Dry Dock
+
+Long range: 420 m long, with spawn to spawn about 400 m. There are no walls past the gantry, with the same out-of-bounds rules as the Derelict Yard.
+
+* **The ship frame:** 40 m square ribs every 30 m from x = −150 to 150, joined by corner longerons and a keel. Patches of hull plating alternate with open bays, so the frame is cover in some stretches and a window in others.
+* **Inside the frame:** a covered lane past fuel tanks, two decks, the midship machinery and part bulkheads. The part bulkheads close the lower left at ±60 and the upper right at ±120, so the inside lane jogs instead of giving one long sightline.
+* **Outside the frame:** open lanes above, below and to each side, where long sightlines are deliberate. Gantry towers, crane arms with hull plates on their hooks, and floating plates and containers act as stepping stones. A dock floor slab below the ship gives you an "up".
+* **The ends:** each end of the ship is an engine block with nozzles. Behind it is a staging area, then the spawn dock with team-coloured cover in the bay.
 
 Open `index.html` in a browser. It is a prebuilt bundle (`dist/delta-v.js`), so no server or build is needed. To rebuild after editing `src/`:
 
@@ -125,6 +160,15 @@ The bundle in `dist/` is committed, so there is no build step on GitHub.
 * All maps have extra cover to break up the long spawn-to-spawn sightlines. The Spin Drum also has half-buried crates on the curved floor between its streets, and floating crates and plates between the core and the floor.
 * Bots' aim error grows with range (about 2× at 45 m, 3× at 90 m), so long-range trades are survivable and close fights stay deadly.
 * In 150 s Hard bot matches, the average life rose from 19 s to 28 s on Hangar, 18 s to 32 s on the Spin Drum, and 42 s to 53 s on the Derelict Yard.
+* On the newer maps in 240–300 s Hard bot matches:
+
+  | Map | Median kill distance | 90th percentile | Average life |
+  | --- | --- | --- | --- |
+  | The Warren | 33–42 m | 53–63 m | 21–27 s |
+  | Carousel | 31–50 m | 56–70 m | 50–85 s |
+  | Dry Dock | 110–127 m | 150–200 m | 55–80 s |
+
+  For comparison, the Spin Drum's median is about 80 m.
 
 ### Spawn shields and ammo depots
 
@@ -274,7 +318,7 @@ Bots fly the same suit through the same thruster allocation, with the same gas b
   * They swap to the flechette up close instead of reloading, and use the gyrojet on slow or anchored targets.
 * **Movement:**
   * Paths come from A* over a 3D navigation graph of free-space and surface nodes, smoothed by string-pulling.
-  * They fly a braking-distance velocity profile and coast inside a deadband to save gas.
+  * They fly a braking-distance velocity profile and coast inside a deadband to save gas. With an empty tank they coast until the compressor has put about 0.8 kg back. They no longer spend each drop as it arrives, which kept resetting the refill delay and left them crawling.
   * They arrive at handholds at about 2.5 m/s and let their arms absorb it, push off walls when they can, dodge sideways when someone aims at them, avoid predicted collisions, and go anchor to refill when their gas runs low.
 * **Loadouts:** each respawn, a bot picks two weapons weighted by:
   * the map (more flechettes in the hangar; gyrojets and recoilless rifles in open space);

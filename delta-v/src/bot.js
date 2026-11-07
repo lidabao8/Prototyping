@@ -427,6 +427,16 @@ export class Bot {
     const s = this.s, w = this.game.world;
     const side = s.team === 0 ? 1 : -1; // direction towards the enemy base
     const B = w.def.bounds, kx = B[0] / 72, ky = B[1] / 36;
+    if (w.def.patrolAny) {
+      // maps that aren't box-shaped (the Carousel's ring): any node, by how far toward the enemy it is
+      const [lo, hi] = this.role === 'rusher' ? [5, 45] : this.role === 'anchor' ? [-25, 20] : [-10, 40];
+      const enemy = 1 - s.team;
+      for (let tries = 0; tries < 40; tries++) {
+        const nd = w.nav[(Math.random() * w.nav.length) | 0];
+        const adv = nd.pos.x * side / kx;
+        if (adv >= lo && adv <= hi && !w.inSpawn(nd.pos, enemy) && !w.inSpawn(nd.pos, s.team)) return nd.i;
+      }
+    }
     let x;
     const r = Math.random();
     if (this.role === 'rusher') x = side * rand(5, 45) * kx;
@@ -611,7 +621,10 @@ export class Bot {
     if (aCmd.length() < dead) aCmd.set(0, 0, 0); else this.coast = false;
     // spinning station: cancel centrifugal pull and Coriolis drift (as far as the jets allow)
     if (w.omega) aCmd.sub(w.gravityAt(s.pos, _v3)).sub(w.coriolis(s.vel, _v3));
-    if (s.gas < 0.05) aCmd.set(0, 0, 0); // dry tank: nothing to command
+    // dry tank: coast until the compressor has put some gas back. Spending every drip as it arrives keeps
+    // resetting the refill delay and leaves the suit crawling along on a few grams of gas.
+    if (s.gas < 0.05) this.dry = true; else if (s.gas > 0.8) this.dry = false;
+    if (this.dry) aCmd.set(0, 0, 0);
     const aAxis = 4 * NOZZLE_F * (g.rules.thrust || 1) / s.mass;
     aCmd.applyQuaternion(_q.copy(s.quat).invert()).divideScalar(aAxis);
     ctrl.move.set(clamp(aCmd.x, -1, 1), clamp(aCmd.y, -1, 1), clamp(aCmd.z, -1, 1));

@@ -39,6 +39,15 @@ const MAP_WEIGHTS = {
   spin: { rifle: 1.0, shotgun: 0.8, gyrojet: 0.7, recoilless: 0.75, railgun: 0.75, maser: 0.9 },
   hangar: { rifle: 1.0, shotgun: 0.95, gyrojet: 0.5, recoilless: 0.6, railgun: 0.7, maser: 0.85 },
   yard: { rifle: 1.0, shotgun: 0.3, gyrojet: 0.95, recoilless: 0.85, railgun: 1.0, maser: 0.9 },
+  carousel: { rifle: 1.0, shotgun: 0.85, gyrojet: 0.65, recoilless: 0.7, railgun: 0.7, maser: 0.9 },
+  warren: { rifle: 1.0, shotgun: 1.25, gyrojet: 0.4, recoilless: 0.45, railgun: 0.5, maser: 0.95 },
+  drydock: { rifle: 0.9, shotgun: 0.2, gyrojet: 1.0, recoilless: 0.9, railgun: 1.2, maser: 0.8 },
+};
+// menu card art for the newer maps (CSS gradients, drawn under a dark fade)
+const MAP_ART = {
+  carousel: 'radial-gradient(circle at 50% 55%, #0d141d 0 16%, rgba(159,232,255,0.35) 17% 18%, transparent 19% 44%, rgba(255,179,71,0.45) 45% 47%, rgba(77,255,195,0.0) 47%), conic-gradient(from 0deg at 50% 55%, rgba(255,179,71,0.18) 0 50%, rgba(77,255,195,0.18) 50% 100%), linear-gradient(135deg, #18202a, #0b1018)',
+  warren: 'repeating-linear-gradient(90deg, transparent 0 22px, rgba(192,123,255,0.16) 22px 34px), repeating-linear-gradient(0deg, transparent 0 22px, rgba(95,255,154,0.14) 22px 34px), linear-gradient(135deg, #1d222a, #10141a)',
+  drydock: 'repeating-linear-gradient(90deg, transparent 0 26px, rgba(201,162,39,0.45) 26px 29px), linear-gradient(0deg, transparent 0 38%, rgba(200,210,220,0.10) 38% 62%, transparent 62%), radial-gradient(circle at 80% 130%, #3b6fb0 0 34%, transparent 35%), linear-gradient(135deg, #070b14, #0c1424)',
 };
 const LONG = new Set(['rifle', 'gyrojet', 'recoilless', 'railgun', 'maser']);
 
@@ -332,6 +341,7 @@ class Game {
       const d = describe && describe(o.value);
       if (d) b.innerHTML = `<b>${o.textContent}</b><span>${d}</span>`; else b.textContent = o.textContent;
       if (kind === 'map' && o.value === 'spin') b.style.backgroundImage = 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), radial-gradient(circle at 50% 50%, transparent 0 34%, rgba(159,232,255,0.25) 35% 37%, transparent 38% 60%, rgba(159,232,255,0.12) 61% 63%, transparent 64%), linear-gradient(135deg, #141c26, #0b1018)';
+      else if (kind === 'map' && MAP_ART[o.value]) b.style.backgroundImage = 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), ' + MAP_ART[o.value];
       else if (kind === 'map') b.style.backgroundImage = o.value === 'yard'
         ? 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), radial-gradient(circle at 75% 120%, #3b6fb0 0 30%, transparent 31%), radial-gradient(1px 1px at 20% 30%, #fff, transparent), radial-gradient(1px 1px at 60% 20%, #fff, transparent), radial-gradient(1px 1px at 40% 60%, #cde, transparent), linear-gradient(135deg, #070b14, #0c1424)'
         : 'linear-gradient(180deg, rgba(4,8,16,0.2), rgba(4,8,16,0.92)), repeating-linear-gradient(90deg, rgba(159,232,255,0.08) 0 2px, transparent 2px 38px), repeating-linear-gradient(0deg, rgba(159,232,255,0.06) 0 2px, transparent 2px 38px), linear-gradient(135deg, #1a2430, #0d141c)';
@@ -718,9 +728,10 @@ class Game {
       const score = minD + Math.random() * 8;
       if (score > bestScore) { bestScore = score; best = p; }
     }
-    const facing = new THREE.Vector3(s.team === 0 ? 1 : -1, 0, 0);
+    const pose = this.world.spawnPose(best);
+    const facing = pose ? pose.facing : new THREE.Vector3(s.team === 0 ? 1 : -1, 0, 0);
     s.loadout = s.isPlayer ? [...this.settings.loadout] : s.prefLoadout ? [...s.prefLoadout] : this.botLoadout(s);
-    s.spawn(best, facing);
+    s.spawn(best, facing, pose && pose.up);
     if (s.isPlayer) this.hud.resetEffects();
     s.oobT = 0;
     s.mode = s.isPlayer ? this.settings.mode : 2;
@@ -1176,7 +1187,7 @@ class Game {
     this.world.updateBarriers(this.time);
     if (this.hardpoint) this.hardpoint.sync(this.time);
     // the stars wheel past the windows of a spinning station (we live in its rotating frame)
-    if (this.world.omega && this.world.space) this.world.space.rotation.x = -this.world.omega * this.time;
+    if (this.world.omega && this.world.space) this.world.space.rotation[this.world.axis === 1 ? 'y' : 'x'] = -this.world.omega * this.time;
     if (this.state !== 'paused') this.combat.syncMeshes(dt);
     this.world.syncPodMeshes();
     for (const s of this.soldiers) s.syncModel(dt);
@@ -1499,7 +1510,7 @@ class Game {
     const cam = this.camera, p = this.player;
     if (this.state === 'menu' || !p) {
       this.menuCam += dt * 0.05;
-      const k = this.world.enclosed ? 1 : 2.4;
+      const k = this.world.def.menuK || (this.world.enclosed ? 1 : 2.4);
       const r = 46 * k;
       cam.position.set(Math.cos(this.menuCam) * r, Math.sin(this.menuCam * 0.7) * 10 * k, Math.sin(this.menuCam) * 26 * k);
       cam.lookAt(0, 0, 0);

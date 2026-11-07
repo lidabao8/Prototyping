@@ -1,13 +1,43 @@
 import * as THREE from 'three';
 import { rayBox, raySphere, closestOnBox, clamp, MinHeap, rand } from './math.js';
 import { buildPod } from './models.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const HX = 72, HY = 36, HZ = 36;
 
 export const MAPS = {
-  hangar: { name: 'Hangar Bay', desc: 'Enclosed 144 m hangar. Walls everywhere to push off.', enclosed: true, bounds: [72, 36, 36], navStep: [6, 7.5], navR: 10.5, spawnX: 64 },
-  spin: { name: 'Spin Drum', desc: 'Rotating drum station at 2.25 rpm: 0.2 g on the rim, fading to zero at the axis. Walk the floor, jump into flight, fly the core.', enclosed: true, drum: 36, omega: 0.2357, bounds: [70, 36, 36], navStep: [6, 7], navR: 10.5, spawnX: 64 },
-  yard: { name: 'Derelict Yard', desc: 'Open orbit, 300 m across. No walls: drift too far and your suit runs out of luck.', enclosed: false, bounds: [150, 70, 70], navStep: [11, 11], navR: 19.5, spawnX: 124 },
+  hangar: { name: 'Hangar Bay', desc: 'Enclosed 144 m hangar. Walls everywhere to push off.', enclosed: true, bounds: [72, 36, 36], navStep: [6, 7.5], navR: 10.5, spawnX: 64, barrierX: 55.8 },
+  spin: { name: 'Spin Drum', desc: 'Rotating drum station at 2.25 rpm: 0.2 g on the rim, fading to zero at the axis. Walk the floor, jump into flight, fly the core.', enclosed: true, drum: 36, omega: 0.2357, bounds: [70, 36, 36], navStep: [6, 7], navR: 10.5, spawnX: 64, barrierX: 55.8 },
+  yard: { name: 'Derelict Yard', desc: 'Open orbit, 300 m across. No walls: drift too far and your suit runs out of luck.', enclosed: false, bounds: [150, 70, 70], navStep: [11, 11], navR: 19.5, spawnX: 124, barrierX: 112 },
+  // A 120 m habitat wheel spinning about y. The teams spawn on opposite sides of the rim (±x) and fight
+  // round two looping streets (north +z, south -z) under a ceiling deck, or cut across the low-g core.
+  carousel: {
+    name: 'Carousel', builder: 'carousel',
+    desc: 'Habitat wheel at 1.7 rpm: 0.2 g on a looping rim street whose floor curves up into the ceiling, low-g decks above it, a zero-g hub at the centre.',
+    enclosed: true, drum: 60, spinAxis: 1, omega: 0.1808, bounds: [60, 14, 60], navStep: [6, 6], navR: 9.5,
+    spawnX: 56, barrierX: 52, spawnY: [-9, -3, 3, 9], spawnZ: [-14, -5, 5, 14], floorRows: [-10, -3.5, 3.5, 10], floorNodes: 64,
+    patrolAny: true, menuK: 0.6, pods: [],
+    pickups: [[0, -9, 57], [0, 9, -57], [26, 6, 12], [-26, 6, 12], [26, -6, -12], [-26, -6, -12]],
+    hardpoints: [[0, -6, 53], [-26, 5, -14], [26, 5, -14], [0, 6, -53]],
+  },
+  // Close quarters: a 112 m hall packed with a 3D grid of blocks. Six-metre lanes on all three axes, a
+  // junction every 16 m, two hollow rooms beside a central reactor chamber.
+  warren: {
+    name: 'The Warren', builder: 'warren',
+    desc: 'Close quarters. A hall packed with a 3D grid of blocks: 6 m lanes on every axis, a junction every 16 m, a reactor chamber in the middle.',
+    enclosed: true, bounds: [56, 24, 24], navStep: [4, 4], navR: 8.5, spawnX: 50, barrierX: 42.7, menuK: 0.2,
+    pods: [[0, 7, -6], [0, -7, 6]],
+    pickups: [[16, 0, 0], [-16, 0, 0], [16, 14.5, -14.5], [-16, 14.5, -14.5], [16, -14.5, 14.5], [-16, -14.5, 14.5]],
+  },
+  // Long range: a 300 m ship frame in a 420 m dry dock. Fight down the protected lane inside the frame
+  // or along the exposed lanes outside it, between gantry towers and floating hull stock.
+  drydock: {
+    name: 'Dry Dock', builder: 'drydock',
+    desc: 'Long range, 420 m. A half-built ship frame in a gantry: a covered lane inside the ribs, open lanes outside them. No walls past the gantry.',
+    enclosed: false, bounds: [210, 60, 60], navStep: [12, 12], navR: 21, spawnX: 196, barrierX: 186, menuK: 3, surfStep: 8,
+    pods: [[30, 32, 32], [-30, 32, 32], [80, -36, -32], [-80, -36, -32], [132, 30, -36], [-132, 30, -36]],
+    pickups: [[40, 0, 0], [-40, 0, 0], [100, -32, 32], [-100, -32, 32], [0, 30, 0], [0, -30, 0]],
+  },
 };
 
 /** Normal map from a texture's luminance (grooves and bolts read as relief). */
@@ -151,17 +181,25 @@ export class World {
     this.mapId = MAPS[mapId] ? mapId : 'hangar';
     this.def = MAPS[this.mapId];
     this.enclosed = this.def.enclosed;
-    this.drum = this.def.drum || 0;          // radius of a spinning drum hull (axis = x), 0 if none
+    this.drum = this.def.drum || 0;          // radius of a spinning drum hull about the spin axis, 0 if none
     this.omega = this.def.omega || 0;        // spin rate (rad/s): centrifugal + Coriolis in the rotating frame
+    // spin axis (0 = x, 1 = y); u, v span the plane of rotation and angles run from u toward v
+    this.axis = this.def.spinAxis || 0;
+    this.au = (this.axis + 1) % 3; this.av = (this.axis + 2) % 3;
+    // flat hull walls: every face of an enclosed box hall, only the end caps of a drum
+    this.hullAxes = this.drum ? [this.axis] : this.enclosed ? [0, 1, 2] : [];
     const B = this.def.bounds;
     this.bounds = { min: [-B[0], -B[1], -B[2]], max: [B[0], B[1], B[2]] };
     this.boxes = [];
     this.spheres = [];
+    this.arcs = [];
     this.pods = [];
     this.group = new THREE.Group();
     scene.add(this.group);
     this._hit = { t: 0, n: new THREE.Vector3(), kind: '', obj: null };
     this._rb = { n: [0, 0, 0] };
+    this._arcN = new THREE.Vector3();
+    this._arcP = new THREE.Vector3();
     this.mats = {
       hull: panelMat('#59616a', '#3a4047', null, 256, 2, { roughness: 0.8, metalness: 0.4 }),
       hullBlue: panelMat('#3d5470', '#26364a', '#3f8cff', 256, 2, { roughness: 0.75, metalness: 0.4 }),
@@ -180,7 +218,11 @@ export class World {
       glyphB: new THREE.MeshBasicMaterial({ color: 0x1d4a8a }),
       glyphO: new THREE.MeshBasicMaterial({ color: 0x8a4a16 }),
     };
-    if (this.drum) this.buildDrum();
+    const builder = this.def.builder;
+    if (builder === 'carousel') this.buildCarousel();
+    else if (builder === 'warren') this.buildWarren();
+    else if (builder === 'drydock') this.buildDryDock();
+    else if (this.drum) this.buildDrum();
     else if (this.enclosed) { this.buildHull(); this.buildInterior(); }
     else this.buildYard();
     this.buildSpace();
@@ -196,19 +238,36 @@ export class World {
   gravityAt(p, out) {
     if (!this.omega) return out.set(0, 0, 0);
     const w2 = this.omega * this.omega;
-    return out.set(0, p.y * w2, p.z * w2);
+    return out.copy(p).multiplyScalar(w2).setComponent(this.axis, 0);
   }
 
-  /** Coriolis acceleration -2 Ω×v for spin about +x. */
+  /** Coriolis acceleration -2 Ω×v, Ω along the spin axis. */
   coriolis(v, out) {
     if (!this.omega) return out.set(0, 0, 0);
-    return out.set(0, 2 * this.omega * v.z, -2 * this.omega * v.y);
+    const k = 2 * this.omega;
+    return this.axis === 1 ? out.set(-k * v.z, 0, k * v.x) : out.set(0, k * v.z, -k * v.y);
   }
 
   /** "Up" on the drum floor: toward the axis. */
   upAt(p, out) {
-    const r = Math.hypot(p.y, p.z);
-    return r > 1e-6 ? out.set(0, -p.y / r, -p.z / r) : out.set(0, 1, 0);
+    out.copy(p).setComponent(this.axis, 0);
+    const r = out.length();
+    return r > 1e-6 ? out.multiplyScalar(-1 / r) : out.set(0, 0, 0).setComponent(this.au, 1);
+  }
+
+  /** Distance from the spin axis. */
+  radial(p) { return Math.hypot(p.getComponent(this.au), p.getComponent(this.av)); }
+
+  /**
+   * Spawn orientation for maps where "up" isn't +y at the spawn: stand upright on the drum floor, facing
+   * along the street toward the nearer bay exit. Null keeps the default (facing the enemy, +y up).
+   */
+  spawnPose(p) {
+    if (!this.omega || this.axis === 0) return null;
+    const up = this.upAt(p, new THREE.Vector3());
+    const f = new THREE.Vector3(0, 0, p.z >= 0 ? 1 : -1);
+    f.addScaledVector(up, -f.dot(up)).normalize();
+    return { facing: f, up };
   }
 
   buildDrum() {
@@ -346,7 +405,7 @@ export class World {
   // ---------- Spawn shields ----------
   /** Plane |x| = barrierX closes off each team's spawn bay: blue at -x, orange at +x. */
   buildBarriers() {
-    this.barrierX = this.drum ? 55.8 : this.enclosed ? 55.8 : 112;
+    this.barrierX = this.def.barrierX;
     const B = this.def.bounds;
     this.barriers = [];
     for (const team of [0, 1]) {
@@ -366,7 +425,12 @@ export class World {
             gl_FragColor = vec4(color*1.6, a);
           }`,
       });
-      const m = new THREE.Mesh(this.drum ? new THREE.CircleGeometry(this.drum, 64) : new THREE.PlaneGeometry(2 * B[2], 2 * B[1]), mat);
+      // the shield fills the hall's cross-section at |x| = barrierX: a disc across a drum spinning about x,
+      // a chord-cut rectangle across a wheel spinning about y, the whole bounds face otherwise
+      const geo = this.drum && this.axis === 0 ? new THREE.CircleGeometry(this.drum, 64)
+        : this.drum ? new THREE.PlaneGeometry(2 * Math.sqrt(Math.max(1, this.drum * this.drum - this.barrierX * this.barrierX)), 2 * B[1])
+        : new THREE.PlaneGeometry(2 * B[2], 2 * B[1]);
+      const m = new THREE.Mesh(geo, mat);
       m.rotation.y = Math.PI / 2;
       m.position.set((team === 0 ? -1 : 1) * this.barrierX, 0, 0);
       m.renderOrder = 5;
@@ -391,6 +455,7 @@ export class World {
 
   // ---------- Ammo depots ----------
   makePickupSpots() {
+    if (this.def.pickups) return this.def.pickups.map(([x, y, z]) => this.nav[this.nearestNode(new THREE.Vector3(x, y, z), false)].pos.clone());
     const k = this.def.bounds[0] / 72, ky = this.def.bounds[1] / 36;
     const half = this.drum
       ? [[24, 0, -9], [15, -33, 0], [42, 0, 33]]
@@ -427,6 +492,192 @@ export class World {
   addMirrored(min, max, matPos, matNeg, opts) {
     this.addBox(min, max, matPos, opts);
     this.addBox([-max[0], min[1], min[2]], [-min[0], max[1], max[2]], matNeg || matPos, opts);
+  }
+
+  // ---------- Arc solids ----------
+  // An annular sector about the spin axis: angles a0..a1 (degrees, measured from the u axis toward v),
+  // radii r0..r1 and axial span h0..h1. On a spinning station these follow the curve of the floor, so
+  // ceilings, bulkheads and street cover line up with the rim instead of jutting out of it.
+  addArc(a0d, a1d, r0, r1, h0, h1, mat, opts = {}) {
+    const TAU = Math.PI * 2;
+    let a0 = a0d * Math.PI / 180, span = (a1d - a0d) * Math.PI / 180;
+    const full = span >= TAU - 1e-6;
+    if (full) { a0 = 0; span = TAU; }
+    if (!full && span > Math.PI) throw new Error('arc span must be under 180 degrees (split it)');
+    a0 = ((a0 % TAU) + TAU) % TAU;
+    const A = { kind: 'arc', a0, span, full, r0, r1, h0, h1, min: [0, 0, 0], max: [0, 0, 0] };
+    if (opts.deco) { // visual only: no collision
+      const mesh = new THREE.Mesh(this.arcGeo(A, opts.tile || 4), mat);
+      mesh.receiveShadow = true; this.group.add(mesh);
+      return A;
+    }
+    // axis-aligned bounds: the corners plus any quarter-turn the arc sweeps through
+    const ax = this.axis, u = this.au, v = this.av;
+    let umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity;
+    const take = (ang, rr) => { const cu = Math.cos(ang) * rr, cv = Math.sin(ang) * rr; umin = Math.min(umin, cu); umax = Math.max(umax, cu); vmin = Math.min(vmin, cv); vmax = Math.max(vmax, cv); };
+    if (full) { umin = vmin = -r1; umax = vmax = r1; }
+    else {
+      for (const rr of [r0, r1]) { take(a0, rr); take(a0 + span, rr); }
+      for (let q = Math.ceil(a0 / (Math.PI / 2)) * Math.PI / 2; q < a0 + span; q += Math.PI / 2) take(q, r1);
+    }
+    A.min[u] = umin; A.max[u] = umax; A.min[v] = vmin; A.max[v] = vmax; A.min[ax] = h0; A.max[ax] = h1;
+    this.arcs.push(A);
+    if (mat) {
+      const mesh = new THREE.Mesh(this.arcGeo(A, opts.tile || 4), mat);
+      mesh.castShadow = opts.shadow !== false; mesh.receiveShadow = true;
+      this.group.add(mesh);
+      A.mesh = mesh;
+    }
+    return A;
+  }
+
+  /** Arc mirrored across x = 0 (the team mirror): on a wheel spinning about y that's angle -> -angle. */
+  addArcMirrored(a0d, a1d, r0, r1, h0, h1, matPos, matNeg, opts) {
+    this.addArc(a0d, a1d, r0, r1, h0, h1, matPos, opts);
+    if (this.axis === 1) this.addArc(-a1d, -a0d, r0, r1, h0, h1, matNeg || matPos, opts);
+  }
+
+  /** Extruded annular sector, laid out with shape x -> u, shape y -> v, extrusion -> spin axis. */
+  arcGeo(A, tile) {
+    const shape = new THREE.Shape();
+    const a1 = A.a0 + A.span;
+    if (A.full) {
+      shape.absarc(0, 0, A.r1, 0, Math.PI * 2, false);
+      if (A.r0 > 0) { const hole = new THREE.Path(); hole.absarc(0, 0, A.r0, 0, Math.PI * 2, true); shape.holes.push(hole); }
+    } else {
+      shape.moveTo(Math.cos(A.a0) * A.r1, Math.sin(A.a0) * A.r1);
+      shape.absarc(0, 0, A.r1, A.a0, a1, false);
+      if (A.r0 > 0) { shape.lineTo(Math.cos(a1) * A.r0, Math.sin(a1) * A.r0); shape.absarc(0, 0, A.r0, a1, A.a0, true); }
+      else shape.lineTo(0, 0);
+      shape.closePath();
+    }
+    const segs = Math.max(2, Math.ceil(A.span * A.r1 / 4)); // arcs get 2x this many segments: about 2 m each
+    const g = new THREE.ExtrudeGeometry(shape, { depth: A.h1 - A.h0, bevelEnabled: false, curveSegments: segs });
+    g.translate(0, 0, A.h0);
+    // permute (x, y, z) -> world (u, v, axis); (axis, u, v) is a cyclic order, so winding is kept
+    const pa = g.attributes.position, na = g.attributes.normal;
+    const ax = this.axis, u = this.au, v = this.av, t = [0, 0, 0];
+    for (const at of [pa, na]) for (let i = 0; i < at.count; i++) {
+      t[u] = at.getX(i); t[v] = at.getY(i); t[ax] = at.getZ(i);
+      at.setXYZ(i, t[0], t[1], t[2]);
+    }
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / tile, uv.getY(i) / tile);
+    g.computeBoundingSphere();
+    return g;
+  }
+
+  /**
+   * Closest point of an arc solid to p. Returns the distance (outside) or minus the penetration depth
+   * (inside); outP gets the surface point, outN the outward normal there.
+   */
+  arcProbe(p, A, outP, outN) {
+    const ax = this.axis, u = this.au, v = this.av;
+    const pu = p.getComponent(u), pv = p.getComponent(v), ph = p.getComponent(ax);
+    const r = Math.hypot(pu, pv), TAU = Math.PI * 2;
+    const th = Math.atan2(pv, pu);
+    const d = A.full ? 0 : (((th - A.a0) % TAU) + TAU) % TAU;
+    if (A.full || d <= A.span) {
+      let cu, cv;
+      if (r > 1e-9) { cu = pu / r; cv = pv / r; } else { const m = A.a0 + A.span / 2; cu = Math.cos(m); cv = Math.sin(m); }
+      const rc = clamp(r, A.r0, A.r1), hc = clamp(ph, A.h0, A.h1);
+      if (rc !== r || hc !== ph) {
+        outP.set(0, 0, 0).setComponent(u, cu * rc).setComponent(v, cv * rc).setComponent(ax, hc);
+        outN.subVectors(p, outP);
+        const dist = outN.length();
+        if (dist > 1e-9) outN.divideScalar(dist); else outN.set(0, 0, 0).setComponent(u, cu).setComponent(v, cv);
+        return dist;
+      }
+      // inside: leave through the nearest face
+      let best = A.r1 - r, nu = cu, nv = cv, nh = 0;
+      if (A.r0 > 0 && r - A.r0 < best) { best = r - A.r0; nu = -cu; nv = -cv; }
+      if (ph - A.h0 < best) { best = ph - A.h0; nu = 0; nv = 0; nh = -1; }
+      if (A.h1 - ph < best) { best = A.h1 - ph; nu = 0; nv = 0; nh = 1; }
+      if (!A.full) {
+        const d0 = r * Math.sin(Math.min(d, Math.PI / 2)), d1 = r * Math.sin(Math.min(A.span - d, Math.PI / 2));
+        if (d0 < best) { best = d0; nu = Math.sin(A.a0); nv = -Math.cos(A.a0); nh = 0; }
+        if (d1 < best) { const a1 = A.a0 + A.span; best = d1; nu = -Math.sin(a1); nv = Math.cos(a1); nh = 0; }
+      }
+      outN.set(0, 0, 0).setComponent(u, nu).setComponent(v, nv).setComponent(ax, nh);
+      outP.copy(p).addScaledVector(outN, best);
+      return -best;
+    }
+    // outside the angular range: the nearest point is on one of the two end faces
+    let bestD = Infinity;
+    for (const ang of [A.a0, A.a0 + A.span]) {
+      const c = Math.cos(ang), sn = Math.sin(ang);
+      const sr = clamp(pu * c + pv * sn, A.r0, A.r1), hc = clamp(ph, A.h0, A.h1);
+      const qu = c * sr, qv = sn * sr;
+      const dd = Math.hypot(pu - qu, pv - qv, ph - hc);
+      if (dd < bestD) { bestD = dd; outP.set(0, 0, 0).setComponent(u, qu).setComponent(v, qv).setComponent(ax, hc); }
+    }
+    outN.subVectors(p, outP);
+    if (bestD > 1e-9) outN.divideScalar(bestD);
+    return bestD;
+  }
+
+  /**
+   * Ray vs arc solid grown by g (g > 0 for swept-sphere tests). Returns the entry distance, 0 when the
+   * ray starts inside, or -1 for a miss. n (optional) gets the surface normal at the hit.
+   */
+  rayArc(o, d, A, maxT, g, n) {
+    const ax = this.axis, u = this.au, v = this.av, TAU = Math.PI * 2;
+    const ou = o.getComponent(u), ov = o.getComponent(v), oh = o.getComponent(ax);
+    const du = d.getComponent(u), dv = d.getComponent(v), dh = d.getComponent(ax);
+    const r0 = Math.max(0, A.r0 - g), r1 = A.r1 + g, h0 = A.h0 - g, h1 = A.h1 + g;
+    const ga = A.full ? 0 : Math.min(0.5, g / Math.max(A.r0, 2));
+    const a0 = A.a0 - ga, span = A.span + 2 * ga;
+    const inAng = (pu, pv) => A.full || (((Math.atan2(pv, pu) - a0) % TAU) + TAU) % TAU <= span;
+    // starting inside counts as an immediate hit (as rayBox does)
+    const or = Math.hypot(ou, ov);
+    if (or >= r0 && or <= r1 && oh >= h0 && oh <= h1 && inAng(ou, ov)) {
+      if (n) n.copy(d).negate();
+      return 0;
+    }
+    let best = maxT, bu = 0, bv = 0, bh = 0, hit = false;
+    const a = du * du + dv * dv, b = ou * du + ov * dv;
+    if (a > 1e-12) {
+      // outer face: entering root
+      let disc = b * b - a * (ou * ou + ov * ov - r1 * r1);
+      if (disc >= 0) {
+        const t = (-b - Math.sqrt(disc)) / a;
+        if (t >= 0 && t < best) {
+          const hh = oh + dh * t, pu = ou + du * t, pv = ov + dv * t;
+          if (hh >= h0 && hh <= h1 && inAng(pu, pv)) { best = t; hit = true; bu = pu / r1; bv = pv / r1; bh = 0; }
+        }
+      }
+      // inner face: where the ray leaves the hole in the middle
+      if (r0 > 0) {
+        disc = b * b - a * (ou * ou + ov * ov - r0 * r0);
+        if (disc >= 0) {
+          const t = (-b + Math.sqrt(disc)) / a;
+          if (t >= 0 && t < best) {
+            const hh = oh + dh * t, pu = ou + du * t, pv = ov + dv * t;
+            if (hh >= h0 && hh <= h1 && inAng(pu, pv)) { best = t; hit = true; bu = -pu / r0; bv = -pv / r0; bh = 0; }
+          }
+        }
+      }
+    }
+    if (Math.abs(dh) > 1e-12) {
+      const t = dh > 0 ? (h0 - oh) / dh : (h1 - oh) / dh;
+      if (t >= 0 && t < best) {
+        const pu = ou + du * t, pv = ov + dv * t, rr = Math.hypot(pu, pv);
+        if (rr >= r0 && rr <= r1 && inAng(pu, pv)) { best = t; hit = true; bu = 0; bv = 0; bh = dh > 0 ? -1 : 1; }
+      }
+    }
+    if (!A.full) for (const [ang, sgn] of [[A.a0, -1], [A.a0 + A.span, 1]]) {
+      const c = Math.cos(ang), sn = Math.sin(ang), nu = -sn * sgn, nv = c * sgn;
+      const dn = du * nu + dv * nv;
+      if (dn >= -1e-12) continue;
+      const t = (g - (ou * nu + ov * nv)) / dn;
+      if (t < 0 || t >= best) continue;
+      const pu = ou + du * t, pv = ov + dv * t, hh = oh + dh * t;
+      const sr = pu * c + pv * sn;
+      if (sr >= r0 && sr <= r1 && hh >= h0 && hh <= h1) { best = t; hit = true; bu = nu; bv = nv; bh = 0; }
+    }
+    if (!hit) return -1;
+    if (n) n.set(0, 0, 0).setComponent(u, bu).setComponent(v, bv).setComponent(ax, bh);
+    return best;
   }
 
   strip(x0, y0, z0, x1, y1, z1, mat) {
@@ -624,7 +875,7 @@ export class World {
 
   buildPods() {
     const proto = buildPod();
-    const places = this.drum ? [] : this.enclosed
+    const places = this.def.pods ? this.def.pods : this.drum ? [] : this.enclosed
       ? [[8, 14, 12], [-8, -14, -12], [30, 0, -24], [-30, 0, 24], [50, 26, 10], [-50, -26, -10], [0, 28, 20], [0, -28, -20]]
       : [[20, 30, 20], [-20, -30, -20], [60, -15, 35], [-60, 15, -35], [95, 25, 10], [-95, -25, -10], [40, 40, -40], [-40, -40, 40], [0, 35, -30], [0, -35, 30], [75, -45, -30], [-75, 45, 30]];
     places.forEach((p, i) => {
@@ -720,6 +971,12 @@ export class World {
       const t = raySphere(o, d, s.c, s.r, best);
       if (t >= 0 && t < best) { best = t; kind = 'sphere'; obj = s; hit.n.set(o.x + d.x * t - s.c.x, o.y + d.y * t - s.c.y, o.z + d.z * t - s.c.z).normalize(); }
     }
+    for (let i = 0; i < this.arcs.length; i++) {
+      const A = this.arcs[i];
+      if (A.max[0] < sx0 || A.min[0] > sx1 || A.max[1] < sy0 || A.min[1] > sy1 || A.max[2] < sz0 || A.min[2] > sz1) continue;
+      const t = this.rayArc(o, d, A, best, 0, this._arcN);
+      if (t >= 0 && t < best) { best = t; kind = 'arc'; obj = A; hit.n.copy(this._arcN); }
+    }
     if (!ignorePods) for (const p of this.pods) {
       const t = raySphere(o, d, p.pos, p.r, best);
       if (t >= 0 && t < best) { best = t; kind = 'pod'; obj = p; hit.n.set(o.x + d.x * t - p.pos.x, o.y + d.y * t - p.pos.y, o.z + d.z * t - p.pos.z).normalize(); }
@@ -728,17 +985,18 @@ export class World {
     const oa = [o.x, o.y, o.z], da = [d.x, d.y, d.z];
     if (this.drum) {
       // inside of the drum: exit through the cylinder wall
-      const a = d.y * d.y + d.z * d.z;
+      const u = this.au, v = this.av;
+      const a = da[u] * da[u] + da[v] * da[v];
       if (a > 1e-12) {
-        const b = 2 * (o.y * d.y + o.z * d.z), c = o.y * o.y + o.z * o.z - this.drum * this.drum;
+        const b = 2 * (oa[u] * da[u] + oa[v] * da[v]), c = oa[u] * oa[u] + oa[v] * oa[v] - this.drum * this.drum;
         const disc = b * b - 4 * a * c;
         if (disc >= 0) {
           const t = (-b + Math.sqrt(disc)) / (2 * a);
-          if (t >= 0 && t < best) { best = t; kind = 'wall'; obj = null; hit.n.set(0, -(o.y + d.y * t), -(o.z + d.z * t)).normalize(); }
+          if (t >= 0 && t < best) { best = t; kind = 'wall'; obj = null; hit.n.set(o.x + d.x * t, o.y + d.y * t, o.z + d.z * t).setComponent(this.axis, 0).negate().normalize(); }
         }
       }
     }
-    if (this.enclosed) for (let i = 0; i < (this.drum ? 1 : 3); i++) {
+    for (const i of this.hullAxes) {
       if (Math.abs(da[i]) < 1e-12) continue;
       const lim = da[i] > 0 ? this.bounds.max[i] : this.bounds.min[i];
       const t = (lim - oa[i]) / da[i];
@@ -761,8 +1019,8 @@ export class World {
       if (av < lo || av > hi || bv < lo || bv > hi) return false;
     }
     if (this.drum) { // the drum is convex: both ends inside means the whole segment is
-      const R2 = (this.drum - r) * (this.drum - r);
-      if (a.y * a.y + a.z * a.z > R2 || b.y * b.y + b.z * b.z > R2) return false;
+      const lim = this.drum - r;
+      if (this.radial(a) > lim || this.radial(b) > lim) return false;
     }
     const sx0 = Math.min(a.x, b.x) - r, sx1 = Math.max(a.x, b.x) + r, sy0 = Math.min(a.y, b.y) - r, sy1 = Math.max(a.y, b.y) + r, sz0 = Math.min(a.z, b.z) - r, sz1 = Math.max(a.z, b.z) + r;
     const eb = { min: [0, 0, 0], max: [0, 0, 0] };
@@ -772,6 +1030,10 @@ export class World {
       if (rayBox(a, d, eb, len, null) >= 0) return false;
     }
     for (const s of this.spheres) if (raySphere(a, d, s.c, s.r + r, len) >= 0) return false;
+    for (const A of this.arcs) {
+      if (A.max[0] < sx0 || A.min[0] > sx1 || A.max[1] < sy0 || A.min[1] > sy1 || A.max[2] < sz0 || A.min[2] > sz1) continue;
+      if (this.rayArc(a, d, A, len, r, null) >= 0) return false;
+    }
     if (!ignorePods) for (const p of this.pods) if (raySphere(a, d, p.pos, p.r + r, len) >= 0) return false;
     return true;
   }
@@ -788,8 +1050,8 @@ export class World {
 
   /** Distance from p to nearest static surface (incl. hull). */
   clearance(p) {
-    let best = this.drum ? Math.min(p.x - this.bounds.min[0], this.bounds.max[0] - p.x, this.drum - Math.hypot(p.y, p.z))
-      : this.enclosed ? Math.min(p.x - this.bounds.min[0], this.bounds.max[0] - p.x, p.y - this.bounds.min[1], this.bounds.max[1] - p.y, p.z - this.bounds.min[2], this.bounds.max[2] - p.z) : 1e9;
+    let best = this.drum ? this.drum - this.radial(p) : 1e9;
+    for (const i of this.hullAxes) { const v = p.getComponent(i); best = Math.min(best, v - this.bounds.min[i], this.bounds.max[i] - v); }
     const c = new THREE.Vector3();
     for (const b of this.boxes) {
       closestOnBox(p, b, c);
@@ -800,6 +1062,11 @@ export class World {
       }
     }
     for (const s of this.spheres) best = Math.min(best, p.distanceTo(s.c) - s.r);
+    for (const A of this.arcs) {
+      const d = this.arcProbe(p, A, c, this._arcN);
+      if (d <= 0) return -1;
+      if (d < best) best = d;
+    }
     return best;
   }
 
@@ -810,10 +1077,10 @@ export class World {
   sphereContacts(p, r, cb) {
     const c = new THREE.Vector3(), n = new THREE.Vector3();
     if (this.drum) {
-      const rr = Math.hypot(p.y, p.z), lim = this.drum - r;
-      if (rr > lim && rr > 1e-6) { n.set(0, -p.y / rr, -p.z / rr); cb(n, rr - lim, 'wall', null); }
+      const rr = this.radial(p), lim = this.drum - r;
+      if (rr > lim && rr > 1e-6) { this.upAt(p, n); cb(n, rr - lim, 'wall', null); }
     }
-    if (this.enclosed) for (let i = 0; i < (this.drum ? 1 : 3); i++) {
+    for (const i of this.hullAxes) {
       const lo = this.bounds.min[i] + r, hi = this.bounds.max[i] - r;
       const v = p.getComponent(i);
       if (v < lo) { n.set(0, 0, 0).setComponent(i, 1); cb(n, lo - v, 'wall', null); }
@@ -845,6 +1112,11 @@ export class World {
       const d = n.length();
       if (d < r + s.r) { n.divideScalar(Math.max(d, 1e-6)); cb(n, r + s.r - d, 'sphere', s); }
     }
+    for (const A of this.arcs) {
+      if (p.x + r < A.min[0] || p.x - r > A.max[0] || p.y + r < A.min[1] || p.y - r > A.max[1] || p.z + r < A.min[2] || p.z - r > A.max[2]) continue;
+      const d = this.arcProbe(p, A, c, n);
+      if (d < r) cb(n, r - d, 'arc', A);
+    }
   }
 
   /** Nearest grabbable surface point within range. Returns {point, normal, kind, obj} or null. */
@@ -852,10 +1124,10 @@ export class World {
     let best = null, bestD = range;
     const c = new THREE.Vector3();
     if (this.drum) {
-      const rr = Math.hypot(p.y, p.z), d = this.drum - rr;
-      if (d < bestD && rr > 1e-6) { bestD = d; best = { point: new THREE.Vector3(p.x, p.y / rr * this.drum, p.z / rr * this.drum), normal: new THREE.Vector3(0, -p.y / rr, -p.z / rr), kind: 'wall', obj: null }; }
+      const rr = this.radial(p), d = this.drum - rr;
+      if (d < bestD && rr > 1e-6) { bestD = d; const n = this.upAt(p, new THREE.Vector3()); best = { point: p.clone().addScaledVector(n, -d), normal: n, kind: 'wall', obj: null }; }
     }
-    if (this.enclosed) for (let i = 0; i < (this.drum ? 1 : 3); i++) {
+    for (const i of this.hullAxes) {
       for (const s of [-1, 1]) {
         const lim = s > 0 ? this.bounds.max[i] : this.bounds.min[i];
         const d = Math.abs(lim - p.getComponent(i));
@@ -881,6 +1153,10 @@ export class World {
         const n = p.clone().sub(s.c).normalize();
         best = { point: s.c.clone().addScaledVector(n, s.r), normal: n, kind: 'sphere', obj: s };
       }
+    }
+    for (const A of this.arcs) {
+      const d = this.arcProbe(p, A, c, this._arcN);
+      if (d < bestD && d > 1e-6) { bestD = d; best = { point: c.clone(), normal: this._arcN.clone(), kind: 'arc', obj: A }; }
     }
     for (const pod of this.pods) {
       const d = p.distanceTo(pod.pos) - pod.r;
@@ -949,8 +1225,9 @@ export class World {
       if (this.clearance(tmp) >= 1.6) nodes.push({ pos: tmp.clone(), surf: false, normal: null });
     }
     // surface nodes on boxes
-    const off = 1.15;
+    const off = 1.15, sStep = this.def.surfStep || 5;
     const addSurf = (p, n) => {
+      if (Math.abs(p.x) > B[0] || Math.abs(p.y) > B[1] || Math.abs(p.z) > B[2]) return; // never route bots out of bounds
       if (this.clearance(p) >= off - 0.05) nodes.push({ pos: p.clone(), surf: true, normal: n.clone() });
     };
     for (const b of this.boxes) {
@@ -958,7 +1235,7 @@ export class World {
         const u = (ax + 1) % 3, v = (ax + 2) % 3;
         const ul = b.max[u] - b.min[u], vl = b.max[v] - b.min[v];
         if (ul < 1.5 && vl < 1.5) continue;
-        const nu = Math.max(1, Math.round(ul / 5)), nv = Math.max(1, Math.round(vl / 5));
+        const nu = Math.max(1, Math.round(ul / sStep)), nv = Math.max(1, Math.round(vl / sStep));
         const n = new THREE.Vector3().setComponent(ax, s);
         for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
           tmp.setComponent(ax, (s > 0 ? b.max[ax] : b.min[ax]) + s * off);
@@ -970,14 +1247,51 @@ export class World {
     }
     // drum floor: standing positions all around the rim
     if (this.drum) {
-      for (let x = -this.bounds.max[0] + 6; x < this.bounds.max[0] - 3; x += 7) for (let k = 0; k < 28; k++) {
-        const a = k / 28 * Math.PI * 2, n = new THREE.Vector3(0, -Math.cos(a), -Math.sin(a));
-        tmp.set(x, Math.cos(a) * (this.drum - off), Math.sin(a) * (this.drum - off));
+      const ax = this.axis, u = this.au, v = this.av, nA = this.def.floorNodes || 28;
+      const rows = this.def.floorRows || [];
+      if (!rows.length) for (let x = -this.bounds.max[ax] + 6; x < this.bounds.max[ax] - 3; x += 7) rows.push(x);
+      for (const x of rows) for (let k = 0; k < nA; k++) {
+        const a = k / nA * Math.PI * 2, n = new THREE.Vector3().setComponent(u, -Math.cos(a)).setComponent(v, -Math.sin(a));
+        tmp.set(0, 0, 0).setComponent(ax, x).setComponent(u, Math.cos(a) * (this.drum - off)).setComponent(v, Math.sin(a) * (this.drum - off));
         addSurf(tmp, n);
       }
     }
+    // arc surfaces: the inner (axis-facing) and outer faces, both axial faces, and broad end faces
+    for (const A of this.arcs) {
+      const ax = this.axis, u = this.au, v = this.av;
+      const put = (ang, rr, h, nr, nh) => {
+        const c = Math.cos(ang), sn = Math.sin(ang);
+        tmp.set(0, 0, 0).setComponent(u, c * rr).setComponent(v, sn * rr).setComponent(ax, h);
+        const n = new THREE.Vector3().setComponent(u, c * nr).setComponent(v, sn * nr).setComponent(ax, nh);
+        addSurf(tmp, n);
+      };
+      const hl = A.h1 - A.h0, nh = Math.max(1, Math.round(hl / 5));
+      for (const [rr, sgn] of [[A.r0 - off, -1], [A.r1 + off, 1]]) {
+        if (rr < 1.5 || (hl < 1.5 && A.span * rr < 1.5)) continue;
+        const na = Math.max(1, Math.round(A.span * rr / 5));
+        for (let i = 0; i < na; i++) for (let j = 0; j < nh; j++) put(A.a0 + A.span * (i + 0.5) / na, rr, A.h0 + hl * (j + 0.5) / nh, sgn, 0);
+      }
+      const rl = A.r1 - A.r0;
+      if (rl >= 1.5) for (const [h, sgn] of [[A.h0 - off, -1], [A.h1 + off, 1]]) {
+        const nr = Math.max(1, Math.round(rl / 5));
+        for (let k = 0; k < nr; k++) {
+          const rr = A.r0 + rl * (k + 0.5) / nr, na = Math.max(1, Math.round(A.span * rr / 5));
+          for (let i = 0; i < na; i++) put(A.a0 + A.span * (i + 0.5) / na, rr, h, 0, sgn);
+        }
+      }
+      if (!A.full && rl >= 1.5 && hl >= 1.5) for (const [ang, sgn] of [[A.a0, -1], [A.a0 + A.span, 1]]) {
+        // end face: the plane through the axis at that angle, pushed out along its normal
+        const nr = Math.max(1, Math.round(rl / 5)), c = Math.cos(ang), sn = Math.sin(ang);
+        const nu = -sn * sgn, nv = c * sgn;
+        for (let k = 0; k < nr; k++) for (let j = 0; j < nh; j++) {
+          const rr = A.r0 + rl * (k + 0.5) / nr, h = A.h0 + hl * (j + 0.5) / nh;
+          tmp.set(0, 0, 0).setComponent(u, c * rr + nu * off).setComponent(v, sn * rr + nv * off).setComponent(ax, h);
+          addSurf(tmp, new THREE.Vector3().setComponent(u, nu).setComponent(v, nv));
+        }
+      }
+    }
     // hull surface nodes
-    if (this.enclosed) for (let ax = 0; ax < (this.drum ? 1 : 3); ax++) for (const s of [-1, 1]) {
+    for (const ax of this.hullAxes) for (const s of [-1, 1]) {
       const u = (ax + 1) % 3, v = (ax + 2) % 3;
       const n = new THREE.Vector3().setComponent(ax, -s);
       const step = 10;
@@ -1117,8 +1431,8 @@ export class World {
   makeSpawns(side) {
     const pts = [];
     const X = this.def.spawnX;
-    const zs = this.enclosed ? [-14, -5, 5, 14] : [-20, -7, 7, 20];
-    for (const y of [-10, -3, 4, 10]) for (const z of zs) pts.push(new THREE.Vector3(side * X, y, z));
+    const zs = this.def.spawnZ || (this.enclosed ? [-14, -5, 5, 14] : [-20, -7, 7, 20]);
+    for (const y of this.def.spawnY || [-10, -3, 4, 10]) for (const z of zs) pts.push(new THREE.Vector3(side * X, y, z));
     return pts;
   }
 
@@ -1220,5 +1534,385 @@ export class World {
     const lb = new THREE.PointLight(0x3f8cff, 30, 60, 1); lb.position.set(-122, 0, 0); this.group.add(lb);
     const lo = new THREE.PointLight(0xff8a2a, 30, 60, 1); lo.position.set(122, 0, 0); this.group.add(lo);
     void HXy;
+  }
+
+  // ---------- Carousel: a habitat wheel spinning about y ----------
+  // Angles run from +z (0, the north midfield) toward +x (90, the orange bay); -90 is the blue bay and
+  // 180 the south midfield. The rim street (r 46-60) loops all the way round under a ceiling deck with
+  // skylights; the core inside it (r < 44) is low-g fading to zero at the hub.
+  buildCarousel() {
+    const M = this.mats, R = this.drum, H = this.def.bounds[1];
+    const C0 = 44, C1 = 46; // ceiling deck between the rim street and the core
+    const glow = (hex, k) => new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k) });
+    const amber = glow(0xffb347, 1.8), teal = glow(0x4dffc3, 1.6), white = M.stripW;
+    const hullAmber = panelMat('#6a5a3e', '#463a26', '#ffb347', 256, 2, { roughness: 0.75, metalness: 0.4 });
+    const hullTeal = panelMat('#3c6458', '#264238', '#4dffc3', 256, 2, { roughness: 0.75, metalness: 0.4 });
+    const half = (south) => (south ? hullTeal : hullAmber);   // north street amber, south street teal
+    const team = (s) => (s > 0 ? M.hullOrange : M.hullBlue);
+    const C = [M.cRed, M.cTeal, M.cYel, M.cGrey];
+    // Four-fold placement by quadrant angle phi (0 = midfield, 90 = spawn bay). The x-mirror swaps the
+    // teams (theta -> -theta). The south street is the north one turned 180 degrees about x (theta ->
+    // 180 - theta, y -> -y), so the two streets differ but both teams see the same map.
+    const quads = [[1, false], [-1, false], [1, true], [-1, true]];
+    const Q = (p0, p1, r0, r1, y0, y1, mat, opts) => {
+      for (const [s, south] of quads) {
+        const a0 = south ? 180 - p1 : p0, a1 = south ? 180 - p0 : p1;
+        const m = typeof mat === 'function' ? mat(s, south) : mat;
+        this.addArc(s > 0 ? a0 : -a1, s > 0 ? a1 : -a0, r0, r1, south ? -y1 : y0, south ? -y0 : y1, m, opts);
+      }
+    };
+    // pieces straddling the midfield lines (phi = 0 north, 180 south)
+    const MID = (hs, r0, r1, y0, y1, mat, opts) => {
+      this.addArc(-hs, hs, r0, r1, y0, y1, typeof mat === 'function' ? mat(false) : mat, opts);
+      this.addArc(180 - hs, 180 + hs, r0, r1, -y1, -y0, typeof mat === 'function' ? mat(true) : mat, opts);
+    };
+    // boxes at a polar position (phi, radius, axial y), placed four-fold like Q
+    const QB = (phi, r, y, h, mat) => {
+      for (const [s, south] of quads) {
+        const th = (south ? 180 - phi : phi) * Math.PI / 180;
+        const x = s * Math.sin(th) * r, z = Math.cos(th) * r, yy = south ? -y : y;
+        this.addBox([x - h, yy - h, z - h], [x + h, yy + h, z + h], typeof mat === 'function' ? mat(s, south) : mat, { tile: 3 });
+      }
+    };
+
+    // ---- hull: the rim floor and two end caps (the +y cap has a window ring onto the stars) ----
+    const shellG = new THREE.CylinderGeometry(R, R, 2 * H, 160, 1, true);
+    const suv = shellG.attributes.uv;
+    for (let i = 0; i < suv.count; i++) suv.setXY(i, suv.getX(i) * (2 * Math.PI * R) / 8, suv.getY(i) * (2 * H) / 8);
+    const shellM = M.deck.clone(); shellM.side = THREE.BackSide;
+    const shell = new THREE.Mesh(shellG, shellM); shell.receiveShadow = true; this.group.add(shell);
+    const disc = (r0, r1, y, mat) => {
+      const g = new THREE.RingGeometry(r0, r1, 128, 1);
+      const uv = g.attributes.uv, k = (2 * r1) / 8;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * k, uv.getY(i) * k);
+      g.rotateX(y > 0 ? Math.PI / 2 : -Math.PI / 2);
+      const m = new THREE.Mesh(g, mat); m.position.y = y; m.receiveShadow = true; this.group.add(m);
+      return m;
+    };
+    const capM = M.hull.clone(); capM.side = THREE.DoubleSide;
+    const capD = M.ceil.clone(); capD.side = THREE.DoubleSide;
+    disc(C0, R, H, capM); disc(0, 10, H, capM);
+    disc(10, C0, H, new THREE.MeshBasicMaterial({ color: 0x88aacc, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false }));
+    disc(0, R, -H, capD);
+    // window struts and frame rings on the +y cap
+    const strut = new THREE.MeshStandardMaterial({ color: 0x80878e, roughness: 0.5, metalness: 0.7 });
+    for (let k = 0; k < 12; k++) {
+      const a = k / 12 * Math.PI * 2, rm = (10 + C0) / 2;
+      this.deco(new THREE.BoxGeometry(0.5, 0.5, C0 - 10), strut, Math.sin(a) * rm, H - 0.3, Math.cos(a) * rm, 0, a, 0);
+    }
+    for (const rr of [10, 27, C0]) { const t = this.deco(new THREE.TorusGeometry(rr, 0.3, 6, 96), strut, 0, H - 0.3, 0, Math.PI / 2, 0, 0); void t; }
+    // big orientation glyphs on the -y cap: an amber half (north) and a teal half (south)
+    for (const [mat, rot] of [[amber, 0], [teal, Math.PI]]) {
+      for (const rr of [20, 36]) {
+        const g = new THREE.TorusGeometry(rr, 0.25, 4, 96, Math.PI);
+        const m = this.deco(g, mat, 0, -H + 0.08, 0, Math.PI / 2, 0, rot); void m; // XYZ Euler: rz turns the half-ring before rx lays it flat
+      }
+    }
+    // rim floor light strips: amber round the north street, teal round the south
+    for (const y of [-9, 9]) for (const [mat, rot] of [[amber, 0], [teal, Math.PI]]) {
+      const g = new THREE.TorusGeometry(R - 0.06, 0.07, 4, 160, Math.PI);
+      this.deco(g, mat, 0, y, 0, Math.PI / 2, 0, rot);
+    }
+
+    // ---- ceiling deck with skylights at the midfields (14 deg), phi 45 (8 deg) and over the bays (10 deg) ----
+    Q(7, 41, C0, C1, -H, H, M.ceil, { tile: 6 });
+    Q(49, 85, C0, C1, -H, H, M.ceil, { tile: 6 });
+    // skylight rims glow so you can find the way up
+    for (const [p0, p1] of [[6.6, 7], [41, 41.4], [48.6, 49], [85, 85.4]]) Q(p0, p1, C1, C1 + 0.12, -H, H, (s, south) => (south ? teal : amber), { deco: true });
+
+    // ---- the rim streets (phi from the midfield toward the bay) ----
+    // midfield plaza round the spoke foot
+    MID(6, 58.5, R, 8, 9.5, M.steel, { tile: 3 });
+    MID(6, 58.5, R, -9.5, -8, M.steel, { tile: 3 });
+    // alternating barricades
+    Q(9, 10.6, 57.8, R, -H, -3, M.steel, { tile: 3 });
+    Q(14, 15.6, 57.8, R, 3, H, M.steel, { tile: 3 });
+    // two-storey block against one wall; its roof is a walkable ledge 8 m up
+    Q(19, 27, 52, R, -H, -5, (s, south) => half(south), { tile: 4 });
+    Q(21, 23.5, 57.5, R, 4, 6.5, C[0], { tile: 3 });
+    // bulkhead frame: two 6 m doors under a lintel, the skylight at phi 45 is the way round it
+    const frame = (p0, p1, mat, doorOut, doorIn) => {
+      Q(p0, p1, 50, R, -H, -doorOut, mat, { tile: 3 });
+      Q(p0, p1, 50, R, -doorIn, doorIn, mat, { tile: 3 });
+      Q(p0, p1, 50, R, doorOut, H, mat, { tile: 3 });
+      Q(p0, p1, C1, 50, -H, H, mat, { tile: 3 });
+    };
+    frame(30, 31.2, (s, south) => half(south), 8, 2);
+    Q(35, 38, 57.4, R, -H, -11.4, C[1], { tile: 3 });   // flush to the cap: no slot to snag in
+    Q(37, 40, 55, R, 1, 4, C[2], { tile: 3 });
+    // pop-up cover under the phi-45 skylight
+    Q(46, 47.4, 58.4, R, -5, 5, M.steel, { tile: 3 });
+    // block shading the bay approach (flush against the bay bulkhead above its door), a crate across from it
+    Q(50, 57, 53, R, 9, H, (s, south) => half(south), { tile: 4 });
+    Q(51, 53.5, 57.5, R, -11, -8.5, C[3], { tile: 3 });
+    // the bay's own bulkhead in team colours, just outside the shield
+    frame(57, 58.2, (s) => team(s), 9, 2.5);
+    // inside the bay: low cover so a spawn isn't a free shot through the doors
+    Q(66, 68, 58.4, R, -6, -1.5, M.steel, { tile: 3 });
+    Q(70, 72, 58.4, R, 2, 6, M.steel, { tile: 3 });
+    // bay floor markings
+    for (const y of [-12, 12]) Q(60, 90, R - 0.08, R - 0.02, y - 0.25, y + 0.25, (s) => (s > 0 ? M.stripO : M.stripB), { deco: true });
+
+    // ---- the core: hub, spokes, a rail hoop, low-g decks, fins and drifting crates ----
+    this.addArc(0, 360, 0, 6, -H, H, M.hull, { tile: 4 });       // the axle, cap to cap
+    this.addArc(0, 360, 6, 9, -3, 3, M.steel, { tile: 3 });      // hub collar
+    this.addArc(0, 360, 9, 9.08, -0.4, 0.4, white, { deco: true });
+    // spokes along z run all the way to the rim floor through the midfield skylights (a ladder between
+    // the streets and the core); the spokes along x stop short of the bay skylights
+    this.addBox([-1, -1, 9], [1, 1, R], M.girder, { tile: 2 });
+    this.addBox([-1, -1, -R], [1, 1, -9], M.girder, { tile: 2 });
+    this.addMirrored([9, -1, -1], [40, 1, 1], M.girder, M.girder, { tile: 2 });
+    this.addArc(0, 360, 24, 25, -0.6, 0.6, M.steel, { tile: 2 }); // rail hoop to crawl round
+    // low-g decks facing the axis (about 0.11 g), one high and one low per quadrant
+    Q(14.5, 30.5, 32, 33, 2, 12, M.steel, { tile: 3 });
+    Q(59.5, 75.5, 32, 33, -12, -2, M.steel, { tile: 3 });
+    Q(14.5, 30.5, 31.9, 31.96, 6.8, 7.2, (s, south) => (south ? teal : amber), { deco: true });
+    Q(59.5, 75.5, 31.9, 31.96, -7.2, -6.8, (s, south) => (south ? teal : amber), { deco: true });
+    // radial fins to break the core's long sightlines
+    Q(39.4, 40.6, 12, 22, -7, 7, M.steel, { tile: 3 });
+    Q(54.4, 55.6, 28, 38, 2, 11, M.steel, { tile: 3 });
+    // drifting crates
+    QB(12, 17, -6, 1.3, C[0]);
+    QB(28, 20, 7, 1.3, C[1]);
+    QB(66, 18, 4, 1.3, C[2]);
+    QB(80, 26, -7, 1.3, C[3]);
+    QB(44, 36, -9, 1.2, C[1]);
+
+    // ---- lighting ----
+    this.group.add(new THREE.HemisphereLight(0xc8d8ff, 0x3a3630, 0.95));
+    const sun = new THREE.DirectionalLight(0xfff0dd, 1.5); sun.position.set(0.25, 1, 0.3); this.group.add(sun);
+    this.sun = sun;
+    const hub = new THREE.PointLight(0xe8f0ff, 60, 60, 1); this.group.add(hub);
+    const ln = new THREE.PointLight(0xffb347, 45, 55, 1); ln.position.set(0, 0, 52); this.group.add(ln);
+    const ls = new THREE.PointLight(0x4dffc3, 45, 55, 1); ls.position.set(0, 0, -52); this.group.add(ls);
+    const lb = new THREE.PointLight(0x3f8cff, 30, 40, 1); lb.position.set(-55, 0, 0); this.group.add(lb);
+    const lo = new THREE.PointLight(0xff8a2a, 30, 40, 1); lo.position.set(55, 0, 0); this.group.add(lo);
+  }
+
+  // ---------- The Warren: close quarters in a 3D grid of blocks ----------
+  // Blocks sit on a 16 m pitch (5 along x, 3 along y and z), leaving 6 m lanes on all three axes and a
+  // junction every 16 m. Every hull wall has its own colour (blue/orange ends, amber deck, pale ceiling,
+  // green -z, violet +z), blocks are coloured by layer and belted by row, so you can tell which way is
+  // which from inside any lane.
+  buildWarren() {
+    const M = this.mats, [HXw, HYw, HZw] = this.def.bounds, g = this.group;
+    const glow = (hex, k) => new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k) });
+    const green = glow(0x5fff9a, 1.6), violet = glow(0xc07bff, 1.7), white = M.stripW;
+    const hullGreen = panelMat('#3e5c4a', '#27392e', '#5fff9a', 256, 2, { roughness: 0.75, metalness: 0.4 });
+    const hullViolet = panelMat('#55456e', '#352b47', '#c07bff', 256, 2, { roughness: 0.75, metalness: 0.4 });
+    // ---- hull walls (the bounds box is the collider) ----
+    const T = 1;
+    const wall = (sx, sy, sz, x, y, z, mat) => { const m = new THREE.Mesh(boxGeo(sx, sy, sz, 6), mat); m.position.set(x, y, z); m.receiveShadow = true; g.add(m); };
+    wall(T, 2 * HYw, 2 * HZw, -HXw - T / 2, 0, 0, M.hullBlue);
+    wall(T, 2 * HYw, 2 * HZw, HXw + T / 2, 0, 0, M.hullOrange);
+    wall(2 * HXw, T, 2 * HZw, 0, -HYw - T / 2, 0, M.deck);
+    wall(2 * HXw, T, 2 * HZw, 0, HYw + T / 2, 0, M.ceil);
+    wall(2 * HXw, 2 * HYw, T, 0, 0, -HZw - T / 2, hullGreen);
+    wall(2 * HXw, 2 * HYw, T, 0, 0, HZw + T / 2, hullViolet);
+
+    // emissive trim is merged into one mesh per colour
+    const trim = new Map();
+    const strip = (x0, y0, z0, x1, y1, z1, mat) => {
+      const bg = new THREE.BoxGeometry(Math.max(0.05, x1 - x0), Math.max(0.05, y1 - y0), Math.max(0.05, z1 - z0));
+      bg.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      if (!trim.has(mat)) trim.set(mat, []);
+      trim.get(mat).push(bg);
+    };
+
+    // ---- the block grid ----
+    const XS = [[-37, -27], [-21, -11], [-5, 5], [11, 21], [27, 37]];
+    const YZ = [[-18, -11], [-5, 5], [11, 18]];
+    const removed = new Set(['0,0,0', '1,1,-1', '-1,1,-1', '1,-1,1', '-1,-1,1', '2,0,0', '-2,0,0']);
+    const layer = [M.cYel, M.cGrey, M.cTeal];   // low / middle / high layer
+    const belt = [green, white, violet];       // -z / middle / +z row
+    // hollow room: 1 m walls with a 4 m door in the middle of every face
+    const room = (lo, hi, mat) => {
+      const t = 1, D = 2;
+      for (let a = 0; a < 3; a++) for (const side of [0, 1]) {
+        const b = (a + 1) % 3, c = (a + 2) % 3;
+        const cb = (lo[b] + hi[b]) / 2, cc = (lo[c] + hi[c]) / 2;
+        const pieces = [[[lo[b], cb - D], [lo[c], hi[c]]], [[cb + D, hi[b]], [lo[c], hi[c]]], [[cb - D, cb + D], [lo[c], cc - D]], [[cb - D, cb + D], [cc + D, hi[c]]]];
+        for (const [[b0, b1], [c0, c1]] of pieces) {
+          const mn = [0, 0, 0], mx = [0, 0, 0];
+          mn[a] = side ? hi[a] - t : lo[a]; mx[a] = side ? hi[a] : lo[a] + t;
+          mn[b] = b0; mx[b] = b1; mn[c] = c0; mx[c] = c1;
+          this.addBox(mn, mx, mat, { tile: 3 });
+        }
+      }
+    };
+    for (let i = -2; i <= 2; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+      if (removed.has(`${i},${j},${k}`)) continue;
+      const [x0, x1] = XS[i + 2], [y0, y1] = YZ[j + 1], [z0, z1] = YZ[k + 1];
+      if (j === 0 && k === 0 && Math.abs(i) === 1) { room([x0, y0, z0], [x1, y1, z1], i > 0 ? M.hullOrange : M.hullBlue); continue; }
+      this.addBox([x0, y0, z0], [x1, y1, z1], layer[j + 1], { tile: 3 });
+      // belt round the block: its colour names the row (green -z, white middle, violet +z)
+      const cx = (x0 + x1) / 2, m = belt[k + 1], e = 0.06, w = 0.18;
+      strip(cx - w, y1, z0, cx + w, y1 + e, z1, m); strip(cx - w, y0 - e, z0, cx + w, y0, z1, m);
+      strip(cx - w, y0, z1, cx + w, y1, z1 + e, m); strip(cx - w, y0, z0 - e, cx + w, y1, z0, m);
+    }
+    // the rooms' doorways glow in the team colour
+    for (const s of [-1, 1]) {
+      const m = s > 0 ? M.stripO : M.stripB, x0 = s * 11, x1 = s * 21;
+      for (const x of [x0, x1]) { strip(x - 0.06, -2.1, -2.1, x + 0.06, -1.95, 2.1, m); strip(x - 0.06, 1.95, -2.1, x + 0.06, 2.1, 2.1, m); }
+    }
+
+    // ---- junction pillars: every x-lane gets two (at |x| = 8 or 24), so no lane runs spawn to spawn ----
+    const lanes = [-21, -8, 8, 21];
+    lanes.forEach((y, iy) => lanes.forEach((z, iz) => {
+      const p = (iy + iz) % 2 ? 8 : 24;
+      this.addMirrored([p - 1.5, y - 1.5, z - 1.5], [p + 1.5, y + 1.5, z + 1.5], M.steel, M.steel, { tile: 2 });
+    }));
+
+    // ---- reactor in the central chamber ----
+    this.spheres.push({ c: new THREE.Vector3(0, 0, 0), r: 3.5 });
+    const reactor = new THREE.Mesh(new THREE.IcosahedronGeometry(3.5, 3), new THREE.MeshStandardMaterial({ color: 0x6a737c, roughness: 0.35, metalness: 0.85, flatShading: true }));
+    reactor.castShadow = true; reactor.receiveShadow = true; g.add(reactor);
+    const core = new THREE.Mesh(new THREE.TorusGeometry(3.65, 0.22, 8, 48), glow(0x5ff6ff, 2.2));
+    core.rotation.x = Math.PI / 2; g.add(core);
+    const core2 = core.clone(); core2.rotation.set(0, Math.PI / 2, 0); g.add(core2);
+    this.reactorRings = [core, core2];
+
+    // ---- spawn bulkheads at |x| = 42: five 6 m doors, one per lane plus the middle ----
+    const BH = (y0, y1, z0, z1) => this.addMirrored([42, y0, z0], [43.5, y1, z1], M.hullOrange, M.hullBlue, { tile: 4 });
+    BH(-24, -11, -24, 24); BH(-11, -5, -24, -11); BH(-11, -5, -5, 5); BH(-11, -5, 11, 24);
+    BH(-5, -3, -24, 24); BH(-3, 3, -24, -3); BH(-3, 3, 3, 24); BH(3, 5, -24, 24);
+    BH(5, 11, -24, -11); BH(5, 11, -5, 5); BH(5, 11, 11, 24); BH(11, 24, -24, 24);
+    for (const s of [-1, 1]) {
+      const m = s > 0 ? M.stripO : M.stripB, x = s * 41.95;
+      for (const [yc, zc] of [[-8, -8], [-8, 8], [8, -8], [8, 8], [0, 0]]) {
+        strip(x - 0.04, yc - 3.1, zc - 3.1, x + 0.04, yc - 2.9, zc + 3.1, m); strip(x - 0.04, yc + 2.9, zc - 3.1, x + 0.04, yc + 3.1, zc + 3.1, m);
+      }
+      // team glyphs on the end wall and consoles in the bay
+      const gm = s > 0 ? M.glyphO : M.glyphB;
+      for (let n = -2; n <= 2; n++) strip(s * (HXw - 0.05) - 0.05, n * 6 - 0.12, -14, s * (HXw - 0.05) + 0.05, n * 6 + 0.12, 14, gm);
+    }
+    // ---- lane markers on deck and ceiling: white runs along every x-lane ----
+    for (const z of lanes) for (const y of [-HYw + 0.03, HYw - 0.03]) strip(-41, y - 0.03, z - 0.12, 41, y + 0.03, z + 0.12, white);
+    for (const [mat, list] of trim) { const mesh = new THREE.Mesh(mergeGeometries(list, false), mat); g.add(mesh); }
+
+    // ---- lighting ----
+    g.add(new THREE.HemisphereLight(0xbfd4ff, 0x4a4036, 1.05));
+    const sun = new THREE.DirectionalLight(0xfff2dd, 1.7); sun.position.set(0.35, 0.9, 0.25); g.add(sun);
+    this.sun = sun;
+    const fill = new THREE.DirectionalLight(0x9db8ff, 0.55); fill.position.set(-0.5, -0.6, -1); g.add(fill);
+    const rl = new THREE.PointLight(0x5ff6ff, 40, 30, 1); g.add(rl);
+    const lb = new THREE.PointLight(0x3f8cff, 26, 40, 1); lb.position.set(-50, 0, 0); g.add(lb);
+    const lo = new THREE.PointLight(0xff8a2a, 26, 40, 1); lo.position.set(50, 0, 0); g.add(lo);
+  }
+
+  // ---------- Dry Dock: long range around a half-built ship ----------
+  // A 300 m ship frame (40 m square ribs every 30 m) lies along x between the two spawn docks. Inside the
+  // frame is a covered lane broken by tanks, decks and part bulkheads; outside it are open lanes with
+  // gantry towers, crane loads and floating hull stock as stepping stones. Spawn to spawn is 400 m.
+  buildDryDock() {
+    const M = this.mats, g = this.group;
+    const glow = (hex, k) => new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k) });
+    const F = 20, G = 1.6; // frame half-size, girder thickness
+    // ---- ribs (x = 0, ±30 ... ±150) and longerons ----
+    const rib = (x, mirror) => {
+      const add = mirror ? (a, b, m) => this.addMirrored(a, b, m, m, { tile: 2 }) : (a, b, m) => this.addBox(a, b, m, { tile: 2 });
+      add([x - G / 2, F - G, -F], [x + G / 2, F, F], M.girder);
+      add([x - G / 2, -F, -F], [x + G / 2, -F + G, F], M.girder);
+      add([x - G / 2, -F + G, F - G], [x + G / 2, F - G, F], M.girder);
+      add([x - G / 2, -F + G, -F], [x + G / 2, F - G, -F + G], M.girder);
+    };
+    rib(0, false);
+    for (const x of [30, 60, 90, 120, 150]) rib(x, true);
+    for (const y of [-1, 1]) for (const z of [-1, 1]) {
+      this.addBox([-150, y > 0 ? F - G : -F, z > 0 ? F - G : -F], [150, y > 0 ? F : -F + G, z > 0 ? F : -F + G], M.steel, { tile: 2 });
+    }
+    this.addBox([-150, -F + G, -1.5], [150, -F + G + 2, 1.5], M.steel, { tile: 2 }); // keel
+    // ---- hull plating: patches that alternate cover and windows down the frame ----
+    const P = 0.6;
+    this.addBox([-90, -F - P, -F], [90, -F, F], M.hull, { tile: 6 });                     // bottom, midships
+    this.addMirrored([30, -F, F], [60, F, F + P], M.hull, M.hull, { tile: 6 });           // +z side
+    this.addMirrored([90, -F, F], [120, F, F + P], M.hull, M.hull, { tile: 6 });
+    this.addBox([-30, -F, -F - P], [30, F, -F], M.hull, { tile: 6 });                     // -z side
+    this.addMirrored([60, -F, -F - P], [90, F, -F], M.hull, M.hull, { tile: 6 });
+    this.addBox([-15, F, -F], [15, F + P, F], M.hull, { tile: 6 });                       // top
+    this.addMirrored([120, F, -F], [150, F + P, F], M.hull, M.hull, { tile: 6 });
+    // ---- inside the frame ----
+    this.addBox([-8, -F + G, -10], [8, -6, 10], M.steel, { tile: 4 }); // midship machinery
+    this.addBox([-4, -6, -4], [4, 2, 4], M.hull, { tile: 4 });                              // bridge on top
+    this.addMirrored([16, 8, 2], [28, 8.6, F - G], M.steel, M.steel, { tile: 3 });           // deck high
+    this.addMirrored([96, -0.3, -F + G], [114, 0.3, -2], M.steel, M.steel, { tile: 3 });     // deck low
+    // part bulkheads: lower-left at the ±60 ribs, upper-right at the ±120 ribs, so the inside lane jogs
+    this.addMirrored([61, -F + G, -F + G], [62, 6, 4], M.hull, M.hull, { tile: 4 });
+    this.addMirrored([118, -4, -4], [119, F - G, F - G], M.hull, M.hull, { tile: 4 });
+    this.addMirrored([36, -F + G, 8], [38.6, -F + G + 2.6, 16], M.cRed, M.cTeal, { tile: 3 });
+    this.addMirrored([82, 10, -16], [84.6, 12.6, -8], M.cYel, M.cYel, { tile: 3 });
+    this.addMirrored([136, -F + G, -14], [138.6, -F + G + 5.2, -11.4], M.cGrey, M.cGrey, { tile: 3 });
+    // fuel tanks
+    const tankMat = new THREE.MeshStandardMaterial({ color: 0xc9cdd2, roughness: 0.35, metalness: 0.6 });
+    const tank = (x, y, z, r) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 32, 20), tankMat);
+      m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m);
+      const band = new THREE.Mesh(new THREE.TorusGeometry(r + 0.05, 0.18, 6, 48), M.steel); band.position.copy(m.position); band.rotation.y = Math.PI / 2; g.add(band);
+      this.spheres.push({ c: new THREE.Vector3(x, y, z), r });
+    };
+    for (const s of [-1, 1]) { tank(s * 45, 7, -9, 6); tank(s * 75, -8, 9, 6); }
+    // ---- the ship's ends: engine blocks with nozzles, the staging area behind them ----
+    this.addMirrored([152, -14, -14], [164, 14, 14], M.hull, M.hull, { tile: 4 });
+    const noz = new THREE.MeshStandardMaterial({ color: 0x3a3f45, roughness: 0.4, metalness: 0.8, side: THREE.DoubleSide });
+    for (const s of [-1, 1]) for (const [y, z] of [[-7, -7], [-7, 7], [7, -7], [7, 7]]) {
+      const n = new THREE.Mesh(new THREE.CylinderGeometry(4, 2.4, 6, 24, 1, true), noz); // flares outward
+      n.position.set(s * 167, y, z); n.rotation.z = -s * Math.PI / 2; g.add(n);
+    }
+    // ---- gantry: towers on the floor slab, crane arms over the ship with hull plates on the hooks ----
+    this.addBox([-175, -54, -34], [175, -52, 34], M.deck, { tile: 8 });                   // dock floor
+    for (const [x, z] of [[40, 40], [110, -40]]) {
+      this.addMirrored([x - 3, -52, z - 3], [x + 3, 42, z + 3], M.girder, M.girder, { tile: 3 });
+      this.addMirrored([x - 1.2, 38, -44], [x + 1.2, 41, 44], M.girder, M.girder, { tile: 2 });
+      this.addMirrored([x - 6, 26, -6], [x + 6, 26.6, 6], M.steel, M.steel, { tile: 3 });  // plate on the hook
+    }
+    // ---- floating hull stock: stepping stones across the outside lanes ----
+    const C = [M.cRed, M.cYel, M.cGrey, M.cTeal];
+    const stock = [
+      // below the ship
+      [[20, -34, -12], [32, -33.4, 0]], [[50, -40, 6], [62, -37.4, 8.6]], [[80, -30, 10], [92, -29.4, 22]], [[128, -44, -20], [130.6, -32, -17.4]],
+      // above
+      [[18, 32, 8], [30, 34.6, 10.6]], [[64, 30, -20], [76, 30.6, -8]], [[96, 40, 14], [98.6, 50, 16.6]], [[140, 34, -6], [152, 34.6, 6]],
+      // +z side
+      [[26, -6, 34], [38, 6, 34.6]], [[70, 8, 30], [72.6, 10.6, 42]], [[100, -16, 46], [112, -4, 46.6]], [[140, -4, 30], [142.6, 8, 32.6]],
+      // -z side
+      [[14, -10, -34], [26, -7.4, -31.4]], [[52, 0, -46], [64, 12, -45.4]], [[86, -18, -30], [88.6, -6, -27.4]], [[134, 6, -46], [146, 18, -45.4]],
+    ];
+    stock.forEach(([a, b], i) => {
+      const thin = Math.min(b[0] - a[0], b[1] - a[1], b[2] - a[2]) < 1;
+      this.addMirrored(a, b, thin ? M.steel : C[i % 4], thin ? M.steel : C[(i + 1) % 4], { tile: 3 });
+    });
+    this.addBox([-6, 30, -30], [6, 32.6, -27.4], C[2], { tile: 3 });
+    this.addBox([-6, -36, 26], [6, -35.4, 38], M.steel, { tile: 3 });
+    this.addBox([-1.3, -6, 34], [1.3, 6, 36.6], C[0], { tile: 3 });
+    // ---- spawn docks ----
+    this.addMirrored([204, -30, -34], [206, 30, 34], M.hullOrange, M.hullBlue, { tile: 6 });
+    this.addMirrored([192, -30, -34], [206, -28, 34], M.deck, M.deck, { tile: 6 });
+    this.addMirrored([192, 28, -34], [206, 30, 34], M.deck, M.deck, { tile: 6 });
+    this.addMirrored([188, -8, -24], [190, 6, -14], M.hullOrange, M.hullBlue, { tile: 3 });
+    this.addMirrored([188, -8, 14], [190, 6, 24], M.hullOrange, M.hullBlue, { tile: 3 });
+    this.addMirrored([188, 10, -5], [190, 16, 5], M.hullOrange, M.hullBlue, { tile: 3 });
+
+    // ---- detail: floodlights on the towers, nav lights on the frame, a hull number ----
+    const lamp = glow(0xfff1d6, 2.2), red = glow(0xff3020, 2.5), grn = glow(0x40ff70, 2.5);
+    for (const s of [-1, 1]) for (const [x, z] of [[40, 40], [110, -40]]) {
+      for (const y of [-20, 10, 40]) this.deco(new THREE.BoxGeometry(2.4, 0.6, 0.3), lamp, s * x, y, z - Math.sign(z) * 3.2);
+    }
+    for (const x of [-150, 150]) for (const y of [-F, F]) for (const z of [-F, F]) this.deco(new THREE.SphereGeometry(0.5, 10, 8), x < 0 ? grn : red, x, y, z);
+    for (let k = -2; k <= 2; k++) this.strip(-90, -F - P - 0.08, k * 3 - 0.15, 90, -F - P - 0.02, k * 3 + 0.15, k ? M.glyphB : M.stripW); // belly stripes
+    // nav lights at the dock corners, as in the yard
+    for (const s of [-1, 1]) for (const y of [-28, 28]) for (const z of [-34, 34]) this.deco(new THREE.SphereGeometry(0.5, 10, 8), s < 0 ? grn : red, s * 204, y, z);
+    // boundary beacons at the corners of the combat area
+    const bm = new THREE.MeshBasicMaterial({ color: 0xff4b3a });
+    const B = this.def.bounds;
+    for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) {
+      const b = new THREE.Mesh(new THREE.OctahedronGeometry(1.2), bm); b.position.set(x * B[0], y * B[1], z * B[2]); g.add(b);
+    }
+    // ---- lighting: hard sunlight, earthshine, team glows ----
+    g.add(new THREE.HemisphereLight(0x9ab4ff, 0x2a3348, 0.75));
+    const sun = new THREE.DirectionalLight(0xfff2dd, 3.1); sun.position.set(-0.3, 0.6, -1); g.add(sun);
+    this.sun = sun;
+    const earth = new THREE.DirectionalLight(0x6f9cff, 0.8); earth.position.set(0.2, -1, 0.5); g.add(earth);
+    const lb = new THREE.PointLight(0x3f8cff, 30, 60, 1); lb.position.set(-196, 0, 0); g.add(lb);
+    const lo = new THREE.PointLight(0xff8a2a, 30, 60, 1); lo.position.set(196, 0, 0); g.add(lo);
   }
 }

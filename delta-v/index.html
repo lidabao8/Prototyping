@@ -63,6 +63,8 @@
   .seg.cards button b { font-size:17px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text); }
   .seg.cards button span { font-size:13px; font-weight:500; color:var(--dim); line-height:1.35; }
   .seg.cards button.on span { color:#c7e9f5; }
+  .seg.cards.map { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  @media (max-width:900px) { .seg.cards.map { grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); } }
   .seg.cards.map button { min-height:120px; background-size:cover; background-position:center; }
   .hidden-select { display:none !important; }
   /* toggles */
@@ -171,7 +173,7 @@
             <select id="optGameMode" data-seg="seg"><option value="tdm">Team Deathmatch</option><option value="hardpoint">Hardpoint</option></select>
             <div class="desc hl" id="gameModeDesc" style="margin:10px 0 18px"></div>
             <h3>OPERATION AREA</h3>
-            <select id="optMap" data-seg="map"><option value="hangar">Hangar Bay</option><option value="spin">Spin Drum</option><option value="yard">Derelict Yard</option></select>
+            <select id="optMap" data-seg="map"><option value="hangar">Hangar Bay</option><option value="spin">Spin Drum</option><option value="yard">Derelict Yard</option><option value="carousel">Carousel</option><option value="warren">The Warren</option><option value="drydock">Dry Dock</option></select>
             <div class="desc hl" id="mapDesc" style="margin-top:10px"></div>
           </div>
           <div class="cols">

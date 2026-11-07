@@ -9,6 +9,8 @@ export const HP = { radius: 7, rotate: 60, warn: 10, limitMul: 5 };
 export function pickHardpoints(world) {
   const lim = world.barrierX * 0.6;
   const B = world.def.bounds;
+  // hand-placed zones (maps whose middle isn't a box, like the Carousel's ring): first is the opener
+  if (world.def.hardpoints) return orderZones(world.def.hardpoints.map(([x, y, z]) => new THREE.Vector3(x, y, z)));
   // middle band of the volume: not hugging the ceiling / floor / side walls
   const ok = world.nav.filter((nd) => !nd.surf && Math.abs(nd.pos.x) < lim && Math.abs(nd.pos.y) < B[1] * 0.55 && Math.abs(nd.pos.z) < B[2] * 0.55 &&
     !world.inSpawn(nd.pos, 0) && !world.inSpawn(nd.pos, 1));
@@ -33,8 +35,14 @@ export function pickHardpoints(world) {
     if (!best) break;
     pts.push(best.pos.clone());
   }
-  // visiting order: centre, then alternate sides so neither team gets two home zones in a row; which side
-  // comes first is random per match
+  return orderZones(pts);
+}
+
+/**
+ * Visiting order: the first zone, then alternate sides so neither team gets two home zones in a row;
+ * which side comes first is random per match.
+ */
+function orderZones(pts) {
   const c = pts.shift();
   const flip = Math.random() < 0.5 ? 1 : -1;
   pts.sort((a, b) => (a.x - b.x) * flip);
